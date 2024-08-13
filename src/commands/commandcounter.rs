@@ -1,7 +1,5 @@
-use serenity::builder::{CreateEmbed, CreateMessage};
 use serenity::model::channel::Message;
 use serenity::prelude::*;
-use serenity::model::Timestamp;
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult};
 use std::collections::HashMap;

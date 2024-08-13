@@ -1,10 +1,14 @@
 
 #![allow(deprecated)]
 mod commands;
+mod utils;
 
 use std::collections::{HashSet, HashMap};
 use std::env;
 use std::sync::Arc;
+
+use tokio::io::{self, AsyncReadExt};
+use tokio::fs::File;
 
 use serenity::async_trait;
 use serenity::framework::standard::Configuration;
@@ -20,6 +24,7 @@ use crate::commands::ping::*;
 use crate::commands::math::*;
 use crate::commands::rating::*;
 use crate::commands::commandcounter::*;
+use crate::utils::data::*;
 
 use serenity::framework::standard::macros::{ group, hook };
 use serenity::model::channel::Message;
@@ -28,30 +33,54 @@ use tracing::{debug, error, info, instrument};
 pub struct ShardManagerContainer;
 
 impl TypeMapKey for ShardManagerContainer {
-    type Value = Arc<ShardManager>;
+  type Value = Arc<ShardManager>;
 }
 
 struct Handler;
 
 #[async_trait]
 impl EventHandler for Handler {
-    async fn ready(&self, _: Context, ready: Ready) {
-        // Log at the INFO level. This is a macro from the `tracing` crate.
-        info!("{} is connected!", ready.user.name);
-    }
+  async fn ready(&self, _: Context, ready: Ready) {
+    // Log at the INFO level. This is a macro from the `tracing` crate.
+    info!("{} is connected!", ready.user.name);
+  }
 
-    // For instrument to work, all parameters must implement Debug.
+  // For instrument to work, all parameters must implement Debug.
+  //
+  // Handler doesn't implement Debug here, so we specify to skip that argument.
+  // Context doesn't implement Debug either, so it is also skipped.
+  #[instrument(skip(self, _ctx))]
+  async fn resume(&self, _ctx: Context, _resume: ResumedEvent) {
+    // Log at the DEBUG level.
     //
-    // Handler doesn't implement Debug here, so we specify to skip that argument.
-    // Context doesn't implement Debug either, so it is also skipped.
-    #[instrument(skip(self, _ctx))]
-    async fn resume(&self, _ctx: Context, _resume: ResumedEvent) {
-        // Log at the DEBUG level.
-        //
-        // In this example, this will not show up in the logs because DEBUG is
-        // below INFO, which is the set debug level.
-        debug!("Resumed");
-    }
+    // In this example, this will not show up in the logs because DEBUG is
+    // below INFO, which is the set debug level.
+    debug!("Resumed");
+  }
+}
+
+// add json data to the global UserData struct from user.json
+async fn initialized_data(client : &Client) -> io::Result<()> {
+  let mut file = match File::open("user.json").await {
+    Ok(f) => f,
+    Err(_) => { File::create("user.json").await? }
+  };
+
+  let mut buffer = vec![0; file.metadata().await?.len() as usize];
+
+  let _ = file.read(&mut buffer).await?;
+
+  let json_str = String::from_utf8(buffer).expect("Failed to convert buffer to string");
+  let user_data : Data = serde_json::from_str(&json_str)?;
+  let user_data_debug = &user_data;
+  info!("data: {:?}", user_data_debug);
+  {
+    let mut data = client.data.write().await;
+    
+    data.insert::<UserData>(Arc::new(RwLock::new(user_data)));
+  }
+  
+  Ok(())
 }
 
 #[hook]
@@ -62,17 +91,22 @@ impl EventHandler for Handler {
 // to `debug`
 #[instrument]
 async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
-    println!("Running command `{command_name}` invoked by {}", msg.author.tag());
-    let counter_lock = {
-      let data_read = ctx.data.read().await;
-      data_read.get::<CommandCounter>().expect("Expect CommandCounter in TypeMap").clone()
-    };
-    {
-      let mut counter = counter_lock.write().await;
-      let entry = counter.entry(command_name.to_string()).or_insert(0);
-      *entry += 1;
-    }
-    true
+  info!("Running command `{command_name}` invoked by {}", msg.author.tag());
+  let counter_lock = {
+    let data_read = ctx.data.read().await;
+    data_read.get::<CommandCounter>().expect("Expect CommandCounter in TypeMap").clone()
+  };
+  {
+    let mut counter = counter_lock.write().await;
+    let entry = counter.entry(command_name.to_string()).or_insert(0);
+    *entry += 1;
+  }
+
+  // add some data to test
+  let _ = add_test_data(ctx).await;
+  // 
+
+  true
 }
 
 #[group]
@@ -86,7 +120,7 @@ async fn main() {
 
   tracing_subscriber::fmt::init();
 
-  let token = env::var("DISCORD_TOKEN").expect("EXpected a token in the environment");
+  let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
   let http = Http::new(&token);
 
@@ -114,6 +148,8 @@ async fn main() {
     .event_handler(Handler)
     .await
     .expect("Err creating client");
+
+  let _ = initialized_data(&client).await;
 
   {
     let mut data = client.data.write().await;
