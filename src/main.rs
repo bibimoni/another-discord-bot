@@ -1,7 +1,7 @@
 
 #![allow(deprecated)]
 mod commands;
-mod utils;
+mod core;
 
 use std::collections::{HashSet, HashMap};
 use std::env;
@@ -24,7 +24,7 @@ use crate::commands::ping::*;
 use crate::commands::math::*;
 use crate::commands::rating::*;
 use crate::commands::commandcounter::*;
-use crate::utils::data::*;
+use crate::core::data::*;
 
 use serenity::framework::standard::macros::{ group, hook };
 use serenity::model::channel::Message;
