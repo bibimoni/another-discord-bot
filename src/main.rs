@@ -3,17 +3,13 @@
 mod commands;
 mod core;
 
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashSet};
 use std::env;
-use std::sync::Arc;
 
-use tokio::io::{self, AsyncReadExt};
-use tokio::fs::File;
-
+use serenity::all::standard::CommandError;
 use serenity::async_trait;
 use serenity::framework::standard::Configuration;
 use serenity::framework::StandardFramework;
-use serenity::gateway::ShardManager;
 use serenity::http::Http;
 use serenity::model::event::ResumedEvent;
 use serenity::model::gateway::Ready;
@@ -29,12 +25,6 @@ use crate::core::data::*;
 use serenity::framework::standard::macros::{ group, hook };
 use serenity::model::channel::Message;
 use tracing::{debug, error, info, instrument};
-
-pub struct ShardManagerContainer;
-
-impl TypeMapKey for ShardManagerContainer {
-  type Value = Arc<ShardManager>;
-}
 
 struct Handler;
 
@@ -59,29 +49,7 @@ impl EventHandler for Handler {
   }
 }
 
-// add json data to the global UserData struct from user.json
-async fn initialized_data(client : &Client) -> io::Result<()> {
-  let mut file = match File::open("user.json").await {
-    Ok(f) => f,
-    Err(_) => { File::create("user.json").await? }
-  };
 
-  let mut buffer = vec![0; file.metadata().await?.len() as usize];
-
-  let _ = file.read(&mut buffer).await?;
-
-  let json_str = String::from_utf8(buffer).expect("Failed to convert buffer to string");
-  let user_data : Data = serde_json::from_str(&json_str)?;
-  let user_data_debug = &user_data;
-  info!("data: {:?}", user_data_debug);
-  {
-    let mut data = client.data.write().await;
-    
-    data.insert::<UserData>(Arc::new(RwLock::new(user_data)));
-  }
-  
-  Ok(())
-}
 
 #[hook]
 // instrument will show additional information on all the logs that happen inside the function.
@@ -107,6 +75,15 @@ async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
   // 
 
   true
+}
+
+#[hook]
+async fn after(ctx : &Context, _: &Message, cmd_name: &str, err: Result<(), CommandError>) {
+  if let Err(why) = err {
+    info!("Error in {}: {:?}", cmd_name, why);
+  }
+  //update json file
+  let _ = update_json(ctx).await;
 }
 
 #[group]
@@ -137,7 +114,7 @@ async fn main() {
     Err(why) => panic!("Could not access application info: {:?}", why),
   };
 
-  let framework = StandardFramework::new().before(before).group(&GENERAL_GROUP);
+  let framework = StandardFramework::new().before(before).after(after).group(&GENERAL_GROUP);
   framework.configure(Configuration::new().owners(owners).prefix("~"));
 
   let intents = GatewayIntents::GUILD_MESSAGES
@@ -149,14 +126,8 @@ async fn main() {
     .await
     .expect("Err creating client");
 
-  let _ = initialized_data(&client).await;
-
-  {
-    let mut data = client.data.write().await;
-    data.insert::<ShardManagerContainer>(client.shard_manager.clone());
-
-    data.insert::<CommandCounter>(Arc::new(RwLock::new(HashMap::default())));
-  }
+  info!("start initialize data");
+  let _ = initialize_data(&client).await;
 
   let shard_manager = client.shard_manager.clone();
 

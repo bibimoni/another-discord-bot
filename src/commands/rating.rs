@@ -7,6 +7,8 @@ use serenity::framework::standard::{Args, CommandResult};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+use crate::add_test_data;
+
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug)]
 struct Contest {

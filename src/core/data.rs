@@ -1,8 +1,14 @@
 use serde_json::Result as SerdeResult;
+use std::collections::HashMap;
+
 use serenity::prelude::*;
+use serenity::gateway::ShardManager;
+
 use tokio::fs::File;
-use tokio::io::{self, BufWriter, AsyncWriteExt};
+use tokio::io::{self, BufWriter, AsyncWriteExt, AsyncReadExt};
 use tokio::fs::OpenOptions;
+
+use crate::commands::commandcounter::*;
 
 use std::sync::Arc;
 
@@ -27,6 +33,13 @@ pub struct UserData;
 impl TypeMapKey for UserData {
   type Value = Arc<RwLock<Data>>;
 }
+
+pub struct ShardManagerContainer;
+
+impl TypeMapKey for ShardManagerContainer {
+  type Value = Arc<ShardManager>;
+}
+
 
 pub async fn update_json(ctx: &Context) -> io::Result<()> {
   info!("got to update json function");
@@ -75,5 +88,38 @@ pub async fn add_test_data(ctx: &Context) -> SerdeResult<()> {
     user_data.data.push(test_data.clone());
     info!("New data: {:?}", user_data);
   }
+  Ok(())
+}
+
+// add json data to the global UserData struct from user.json
+pub async fn initialize_data(client : &Client) -> io::Result<()> {
+  let mut file = match File::open("user.json").await {
+    Ok(f) => f,
+    Err(_) => { File::create("user.json").await? }
+  };
+
+  let mut buffer = vec![0; file.metadata().await?.len() as usize];
+
+  let _ = file.read(&mut buffer).await?;
+  info!("length of file: {}", file.metadata().await?.len());
+  let json_str = String::from_utf8(buffer).expect("Failed to convert buffer to string");
+  info!("json string is: {:?}", &json_str);
+  let user_data : Data = match serde_json::from_str(&json_str) {
+    Ok(str) => { str },
+    Err(why) => { 
+      info!("Json error : {:?}", why);
+      return Ok(()); 
+    } 
+  };
+  let user_data_debug = &user_data;
+  info!("data: {:?}", user_data_debug);
+  {
+    let mut data = client.data.write().await;
+    
+    data.insert::<UserData>(Arc::new(RwLock::new(user_data)));
+    data.insert::<ShardManagerContainer>(client.shard_manager.clone());
+    data.insert::<CommandCounter>(Arc::new(RwLock::new(HashMap::default())));
+  }
+  
   Ok(())
 }
