@@ -12,7 +12,7 @@ use crate::commands::commandcounter::*;
 
 use std::sync::Arc;
 
-use tracing::{info, error};
+use tracing::{info, error, warn};
 
 use serde::{Deserialize, Serialize};
 
@@ -146,7 +146,7 @@ pub async fn initialize_data(client : &Client) -> io::Result<()> {
   let user_data : Data = match serde_json::from_str(&json_str) {
     Ok(str) => { str },
     Err(why) => { 
-      error!("Json error : {:?}", why);
+      warn!("Json error : {:?}", why);
       {
         let mut data = client.data.write().await;
         data.insert::<UserData>(Arc::new(RwLock::new(Data { data: Vec::new() })));
