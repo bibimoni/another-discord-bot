@@ -354,7 +354,7 @@ async fn handle(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     match problem_result {
       Ok(problem) => {
         // info!("Waitting...");
-        sleep(Duration::from_millis(20 * 1000)).await;
+        sleep(Duration::from_millis(60 * 1000)).await;
         let _ = check_user_registration(&ctx_clone, &msg_clone, &problem, &client, &user).await;
         // info!("Finished!!");
       },
