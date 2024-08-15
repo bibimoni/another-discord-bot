@@ -10,6 +10,8 @@ use reqwest::Client;
 
 use serde::{Deserialize, Serialize};
 
+use crate::create_error_response;
+
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug)]
 struct Contest {
@@ -49,17 +51,6 @@ fn create_rating_message(rating : u32, handle : &String, msg: &Message) -> Creat
   builder
 }
 
-pub fn create_error_message(user: &String, msg: &Message) -> CreateMessage {
-  let embed = CreateEmbed::new()
-    .colour(Colour::RED)
-    .description(format!("No user with handle `{handle}` found", handle = user))
-    .timestamp(Timestamp::now());
-  let builder = CreateMessage::new()
-    .content(format!("<@{id}>", id = msg.author.id))
-    .embed(embed);
-  builder
-}
-
 #[command]
 pub async fn rating(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
   let client = Client::new();
@@ -83,7 +74,7 @@ pub async fn rating(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     }, 
     _ => {
       // msg.channel_id.say(&ctx.http, "Codeforces API error").await?;
-      let message = create_error_message(&user, msg);
+      let message = create_error_response(format!("No user with handle `{handle}` found", handle = user), &msg);
       msg.channel_id.send_message(&ctx.http, message).await?;
     }
   }

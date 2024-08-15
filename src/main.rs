@@ -62,10 +62,12 @@ impl EventHandler for Handler {
 #[instrument]
 async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
   info!("Running command `{command_name}` invoked by {}", msg.author.tag());
-  let counter_lock = {
-    let data_read = ctx.data.read().await;
-    data_read.get::<CommandCounter>().expect("Expect CommandCounter in TypeMap").clone()
-  };
+  let counter_lock;
+  let data_read = ctx.data.read().await;
+  match data_read.get::<CommandCounter>() {
+    Some(data) => counter_lock = data.clone(),
+    None => { return true; }
+  }
   {
     let mut counter = counter_lock.write().await;
     let entry = counter.entry(command_name.to_string()).or_insert(0);
@@ -82,7 +84,7 @@ async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
 #[hook]
 async fn after(ctx : &Context, _: &Message, cmd_name: &str, err: Result<(), CommandError>) {
   if let Err(why) = err {
-    info!("Error in {}: {:?}", cmd_name, why);
+    error!("Error in {}: {:?}", cmd_name, why);
   }
   //update json file
   let _ = update_json(ctx).await;
@@ -128,7 +130,7 @@ async fn main() {
     .await
     .expect("Err creating client");
 
-  info!("start initialize data");
+  // info!("start initialize data");
   let _ = initialize_data(&client).await;
 
   let shard_manager = client.shard_manager.clone();
