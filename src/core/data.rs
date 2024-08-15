@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 #[allow(non_snake_case)]
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct User {
-  userId : String, 
-  handle : String
+  pub userId : String, 
+  pub handle : String
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -71,6 +71,7 @@ pub async fn update_json(ctx: &Context) -> io::Result<()> {
   Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn add_test_data(ctx: &Context) -> SerdeResult<()> {
   // add data to test
   let data = r#"

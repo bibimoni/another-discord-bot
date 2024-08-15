@@ -1,5 +1,3 @@
-use crate::core::data::*;
-
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::CommandResult;
 use serenity::model::prelude::*;

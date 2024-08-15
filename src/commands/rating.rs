@@ -4,10 +4,11 @@ use serenity::prelude::*;
 use serenity::model::Timestamp;
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult};
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serenity::model::Colour;
 
-use crate::add_test_data;
+use reqwest::Client;
+
+use serde::{Deserialize, Serialize};
 
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug)]
@@ -37,6 +38,7 @@ fn get_user (contest : &Contest) -> &String {
 
 fn create_rating_message(rating : u32, handle : &String, msg: &Message) -> CreateMessage {
   let embed = CreateEmbed::new()
+    .colour(Colour::BLUE)
     .title(format!("Rating of {user}", user = handle))
     .field("Rating", rating.to_string(), false)
     .timestamp(Timestamp::now());
@@ -47,8 +49,19 @@ fn create_rating_message(rating : u32, handle : &String, msg: &Message) -> Creat
   builder
 }
 
+pub fn create_error_message(user: &String, msg: &Message) -> CreateMessage {
+  let embed = CreateEmbed::new()
+    .colour(Colour::RED)
+    .description(format!("No user with handle `{handle}` found", handle = user))
+    .timestamp(Timestamp::now());
+  let builder = CreateMessage::new()
+    .content(format!("<@{id}>", id = msg.author.id))
+    .embed(embed);
+  builder
+}
+
 #[command]
-pub async fn rating(ctx: &Context, msg: &Message, args : Args) -> CommandResult {
+pub async fn rating(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
   let client = Client::new();
   let user = args.parse::<String>()?;
   let url = format!("https://codeforces.com/api/user.rating?handle={handle}", handle = user);
@@ -69,7 +82,9 @@ pub async fn rating(ctx: &Context, msg: &Message, args : Args) -> CommandResult 
       };
     }, 
     _ => {
-      msg.channel_id.say(&ctx.http, "Codeforces API error").await?;
+      // msg.channel_id.say(&ctx.http, "Codeforces API error").await?;
+      let message = create_error_message(&user, msg);
+      msg.channel_id.send_message(&ctx.http, message).await?;
     }
   }
 

@@ -20,6 +20,8 @@ use crate::commands::ping::*;
 use crate::commands::math::*;
 use crate::commands::rating::*;
 use crate::commands::commandcounter::*;
+use crate::commands::handle::*;
+
 use crate::core::data::*;
 
 use serenity::framework::standard::macros::{ group, hook };
@@ -71,7 +73,7 @@ async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
   }
 
   // add some data to test
-  let _ = add_test_data(ctx).await;
+  // let _ = add_test_data(ctx).await;
   // 
 
   true
@@ -87,7 +89,7 @@ async fn after(ctx : &Context, _: &Message, cmd_name: &str, err: Result<(), Comm
 }
 
 #[group]
-#[commands(ping, message, multiply, rating, command_counter)]
+#[commands(handle, ping, message, multiply, rating, command_counter)]
 struct General;
 
 #[tokio::main]
