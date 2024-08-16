@@ -127,7 +127,7 @@ async fn add_handle(ctx: &Context, msg: &Message, problem: &Problem, handle: &St
     }
   };
   if problem != &lastest_submission.problem {
-    return Err(format!("Your lastest problem isn't the same with the required one!"));
+    return Err(format!("You need to submit a `COMPLILATION_ERROR` to the required problem!"));
   }
   let user_id = msg.author.id.to_string();
   let _ = add_user_to_data(&ctx, &user_id, &handle).await;
@@ -219,7 +219,7 @@ pub fn create_problem_message(problem: &Problem, show_rating: bool) -> Option<Cr
   }
   embed = embed.timestamp(Timestamp::now());
   let builder = CreateMessage::new()
-    .content(format!("Make `COMPILATION_ERROR` submission to the following problem in 60 seconds"))
+    .content(format!("Make a `COMPILATION_ERROR` submission to the following problem in 60 seconds"))
     .embed(embed);
 
   Some(builder)
