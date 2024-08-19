@@ -1,16 +1,14 @@
-use serenity::builder::{CreateEmbed, CreateMessage};
 use serenity::model::channel::Message;
 use serenity::prelude::*;
-use serenity::model::Timestamp;
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult};
-use serenity::model::Colour;
 
 use reqwest::Client;
 
 use serde::{Deserialize, Serialize};
 
-use crate::create_error_response;
+use crate::utils::message_creator::*;
+use crate::error_response;
 
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug)]
@@ -34,50 +32,44 @@ fn get_rating (contest : &Contest) -> u32 {
   contest.newRating
 }
 
-fn get_user (contest : &Contest) -> &String {
-  &contest.handle
-}
-
-fn create_rating_message(rating : u32, handle : &String, msg: &Message) -> CreateMessage {
-  let embed = CreateEmbed::new()
-    .colour(Colour::BLUE)
-    .title(format!("Rating of {user}", user = handle))
-    .field("Rating", rating.to_string(), false)
-    .timestamp(Timestamp::now());
-  let builder = CreateMessage::new()
-    .content(format!("<@{id}>", id = msg.author.id))
-    .embed(embed);
-
-  builder
-}
+pub async fn get_user_rating(user: &String) -> Result<u32, String> {
+  let client = Client::new();
+  let url = format!("https://codeforces.com/api/user.rating?handle={handle}", handle = user);
+  let http_result = client.get(url).send().await;
+  if let Err(_) = http_result {
+    return Err(format!("Codeforces API error"));
+  } else {
+    let result = http_result.unwrap();
+    match result.status() {
+      reqwest::StatusCode::OK => {
+        match result.json::<APIRespone>().await {
+          Ok(parsed) => { 
+            let rating_from_last_contest = get_rating(&parsed.result[parsed.result.len() - 1]);
+            return Ok(rating_from_last_contest);
+          },  
+          Err(_) => {
+            return Err(format!("Failed to match json"));
+          }
+        };
+      }, 
+      _ => {
+        return Err(format!("No user with handle `{handle}` found", handle = user));
+      }
+    }
+  }
+} 
 
 #[command]
 pub async fn rating(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-  let client = Client::new();
   let user = args.parse::<String>()?;
-  let url = format!("https://codeforces.com/api/user.rating?handle={handle}", handle = user);
-  let http_result = client.get(url).send().await?;
-  match http_result.status() {
-    reqwest::StatusCode::OK => {
-      match http_result.json::<APIRespone>().await {
-        Ok(parsed) => { 
-          let rating_from_last_contest = get_rating(&parsed.result[parsed.result.len() - 1]);
-          let user = get_user(&parsed.result[parsed.result.len() - 1]);
-          let message = create_rating_message(rating_from_last_contest, user, &msg);
-          msg.channel_id.send_message(&ctx.http, message).await?;
-          // msg.channel_id.say(&ctx.http, rating_from_last_contest.to_string()).await?;
-        },
-        Err(_) => { 
-          msg.channel_id.say(&ctx.http, "failed to match json").await?; 
-        }
-      };
-    }, 
-    _ => {
-      // msg.channel_id.say(&ctx.http, "Codeforces API error").await?;
-      let message = create_error_response(format!("No user with handle `{handle}` found", handle = user), &msg);
+  match get_user_rating(&user).await {
+    Ok(rating) => {
+      let message = create_rating_message(rating, &user, &msg);
       msg.channel_id.send_message(&ctx.http, message).await?;
+    },
+    Err(why) => {
+      error_response!(ctx, msg, why);
     }
   }
-
   Ok(())
 }

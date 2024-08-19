@@ -2,11 +2,11 @@
 #![allow(deprecated)]
 mod commands;
 mod core;
+mod utils;
 
-use std::collections::{HashSet};
+use std::collections::HashSet;
 use std::env;
 
-use serenity::all::standard::CommandError;
 use serenity::async_trait;
 use serenity::framework::standard::Configuration;
 use serenity::framework::StandardFramework;
@@ -21,6 +21,7 @@ use crate::commands::math::*;
 use crate::commands::rating::*;
 use crate::commands::commandcounter::*;
 use crate::commands::handle::*;
+use crate::commands::giveme::*;
 
 use crate::core::data::*;
 
@@ -51,15 +52,13 @@ impl EventHandler for Handler {
   }
 }
 
-
-
 #[hook]
 // instrument will show additional information on all the logs that happen inside the function.
 //
 // This additional information includes the function name, along with all it's arguments formatted
 // with the Debug impl. This additional information will also only be shown if the LOG level is set
 // to `debug`
-#[instrument]
+// #[instrument]
 async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
   info!("Running command `{command_name}` invoked by {}", msg.author.tag());
   let counter_lock;
@@ -81,17 +80,16 @@ async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
   true
 }
 
-#[hook]
-async fn after(ctx : &Context, _: &Message, cmd_name: &str, err: Result<(), CommandError>) {
-  if let Err(why) = err {
-    error!("Error in {}: {:?}", cmd_name, why);
-  }
-  //update json file
-  let _ = update_json(ctx).await;
-}
-
 #[group]
-#[commands(handle, ping, message, multiply, rating, command_counter)]
+#[commands(
+  handle, 
+  ping, 
+  message, 
+  multiply, 
+  rating, 
+  command_counter, 
+  giveme
+)]
 struct General;
 
 #[tokio::main]
@@ -118,7 +116,7 @@ async fn main() {
     Err(why) => panic!("Could not access application info: {:?}", why),
   };
 
-  let framework = StandardFramework::new().before(before).after(after).group(&GENERAL_GROUP);
+  let framework = StandardFramework::new().before(before).group(&GENERAL_GROUP);
   framework.configure(Configuration::new().owners(owners).prefix("~"));
 
   let intents = GatewayIntents::GUILD_MESSAGES

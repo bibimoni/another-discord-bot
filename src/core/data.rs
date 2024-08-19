@@ -1,5 +1,6 @@
 use serde_json::Result as SerdeResult;
 use std::collections::HashMap;
+use std::time::SystemTime;
 
 use serenity::prelude::*;
 use serenity::gateway::ShardManager;
@@ -9,6 +10,7 @@ use tokio::io::{self, BufWriter, AsyncWriteExt, AsyncReadExt};
 use tokio::fs::OpenOptions;
 
 use crate::commands::commandcounter::*;
+use crate::commands::handle::*;
 
 use std::sync::Arc;
 
@@ -20,7 +22,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct User {
   pub userId : String, 
-  pub handle : String
+  pub handle : String,
+  pub active_challange: Option<Problem>,
+  pub last_time_since_challange: Option<SystemTime>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -42,27 +46,28 @@ impl TypeMapKey for ShardManagerContainer {
 
 
 pub async fn update_json(ctx: &Context) -> io::Result<()> {
-  // info!("got to update json function");
   let data_read = ctx.data.read().await;
   let user_data_lock; 
   match data_read.get::<UserData>() {
     Some(data) => user_data_lock = data.clone(),
-    None => return Ok(())
+    None => {
+      return Ok(())
+    }
   }
   let user_data = user_data_lock.read().await;
-  let user_data_json = serde_json::to_string(&(*user_data))?;
-  let data = user_data_json;
-  // info!("finished convert data to string: {:?}", data);
+  let user_data_json = serde_json::to_string(&(*user_data));
+  let data = user_data_json.unwrap();
+  error!("user_data_json: {:?}", data);
   let file = match OpenOptions::new().write(true).open("user.json").await {
     Ok(f) => f,
     Err(_) => { File::create("user.json").await? }
   };
-  // info!("finished getting the file object: {:?}", file);
+  info!("finished getting the file object: {:?}", file);
   {
     let mut buffer = BufWriter::new(file);
     match buffer.write_all(&data.as_bytes()).await {
       Ok(_) => {
-        // info!("write successful");
+        info!("write successful");
       }, 
       Err(why) => {
         error!("can't write because of the following error: {:?}", why);
@@ -70,6 +75,7 @@ pub async fn update_json(ctx: &Context) -> io::Result<()> {
     };
     buffer.flush().await?;
   }
+  
   Ok(())
 }
 
@@ -95,30 +101,48 @@ pub async fn add_test_data(ctx: &Context) -> SerdeResult<()> {
 }
 
 pub async fn add_user_to_data(ctx: &Context, user_id: &String, handle: &String) -> SerdeResult<()> {
-  // add data to test
-  let data = format!(r#"
-  {{
-    "userId" : "{user_id}",
-    "handle" : "{handle}"
-  }}"#, user_id = user_id, handle = handle);
-  // info!("Called add test data, the new data : {:?}", data);
-  let test_data : User = serde_json::from_str(&data).unwrap();
-  let data_read = ctx.data.read().await;
-  let user_data_lock;
-  // info!("Test data: {:#?}", test_data);
-  match data_read.get::<UserData>() {
-    Some(data) => {
-      user_data_lock = data.clone();
-      let mut user_data = user_data_lock.write().await;
-      user_data.data.push(test_data.clone());
-      // info!("New data: {:?}", user_data);
-    },
-    None => {
-      let user_data = Data {data : Vec::from([test_data])};
-      // info!("New data: {:?}", user_data);
-      let mut data = ctx.data.write().await;
-      data.insert::<UserData>(Arc::new(RwLock::new(user_data)));
+  {
+    // add data to test
+    let data = format!(r#"
+    {{
+      "userId" : "{user_id}",
+      "handle" : "{handle}"
+    }}"#, user_id = user_id, handle = handle);
+    // info!("Called add test data, the new data : {:?}", data);
+    let test_data : User = serde_json::from_str(&data).unwrap();
+    let data_read = ctx.data.read().await;
+    let user_data_lock;
+    // info!("Test data: {:#?}", test_data);
+    match data_read.get::<UserData>() {
+      Some(data) => {
+        user_data_lock = data.clone();
+        let mut user_data = user_data_lock.write().await;
+        user_data.data.push(test_data.clone());
+        // info!("New data: {:?}", user_data);
+      },
+      None => {
+        let user_data = Data {data : Vec::from([test_data])};
+        // info!("New data: {:?}", user_data);
+        let mut data = ctx.data.write().await;
+        data.insert::<UserData>(Arc::new(RwLock::new(user_data)));
+      }
     }
+  }
+  let _ = update_json(ctx).await;
+  Ok(())
+}
+
+pub async fn add_problem_to_user(ctx: &Context, user_id: &String, problem: &Problem) -> SerdeResult<()>{
+  {
+    let data_read = ctx.data.read().await;
+    let user_data_lock = data_read.get::<UserData>().expect("Expect UserData in TypeMap").clone();
+    let mut user_data = user_data_lock.write().await;
+    user_data.data.iter_mut().for_each(|user| {
+      if &user.userId == user_id {
+        user.active_challange = Some(problem.clone());
+        user.last_time_since_challange = Some(SystemTime::now());
+      }
+    });
   }
   let _ = update_json(ctx).await;
   Ok(())
@@ -161,4 +185,15 @@ pub async fn initialize_data(client : &Client) -> io::Result<()> {
     data.insert::<UserData>(Arc::new(RwLock::new(user_data)));
   }
   Ok(())
+}
+
+pub async fn get_data(ctx: &Context) -> Result<Data, String> {
+  let data_read = ctx.data.read().await;
+  let data_lock;
+  match data_read.get::<UserData>() {
+    Some(data) => { data_lock = data.clone() },
+    None => { return Err(format!("There is no data in the database")); }
+  }
+  let data = data_lock.read().await;
+  return Ok((*data).clone());
 }
