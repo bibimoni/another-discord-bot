@@ -75,15 +75,7 @@ async fn handle_uncomplete_challange(user: &User) -> Result<(), String> {
   if user.active_challange == None || user.last_time_since_challange == None {
     return Ok(());
   }
-  if user.last_time_since_challange.unwrap().elapsed().unwrap() < CHALLANGE_DURATION {
-    // let elapsed_time = user.last_time_since_challange.unwrap().elapsed().unwrap();
-    // let seconds = elapsed_time.as_secs() % 60;
-    // let minutes = (elapsed_time.as_secs() / 60) % 60;
-    // let hours = ((elapsed_time.as_secs() / 60) / 60) % 60;
-    // return Err(format!("Keep trying, you still have {:0>2}h {:0>2}m {:0>2}s left", hours, minutes, seconds));
-    return Err(format!("You still have an active challange!"));
-  }
-  Ok(())
+  return Err(format!("You still have an active challange!"));
 }
 
 
@@ -214,7 +206,7 @@ async fn giveme(ctx: &Context, msg: &Message, mut args : Args) -> CommandResult 
       let message = create_problem_message(&problem, format!("We recommended this problem for you"), true).unwrap();
       msg.channel_id.send_message(&ctx.http, message).await?;
       if give_type == "challange" || give_type == "c" {
-        add_problem_to_user(&ctx, &user_id, &problem).await?;
+        add_problem_to_user(&ctx, &user_id, Some(&problem)).await?;
       }
     },
     Err(why) => {
@@ -225,6 +217,55 @@ async fn giveme(ctx: &Context, msg: &Message, mut args : Args) -> CommandResult 
   Ok(())
 }
 
-// TODO: add a skip option (practice / challange with a force option)
-// #[command]
-//pub async fn skip()
+#[command]
+pub async fn skip(ctx: &Context, msg: &Message, mut args : Args) -> CommandResult {
+  macro_rules! skip_response {
+    () => {
+      let embed = CreateEmbed::new()
+        .description(format!("Skip successfully!"))
+        .color(Colour::DARK_GREEN);
+      let builder = CreateMessage::new()
+        .embed(embed);
+      msg.channel_id.send_message(&ctx.http, builder).await?;  
+    }
+  }
+  let user_id = msg.author.id.to_string();
+  let user_wrap = find_user_in_data(&ctx, &user_id).await;
+  if let Err(why) = user_wrap {
+    error_response!(ctx, msg, why);
+    return Ok(());
+  }
+  let user = user_wrap.unwrap();
+  if user.active_challange == None || user.last_time_since_challange == None {
+    error_response!(ctx, msg, format!("You don't have an active challange to skip"));
+    return Ok(());
+  }
+  let force_option = args.single::<String>();
+  if let Ok(_) = force_option {
+    let option = force_option?;
+    if option == "-f" || option == "-force" {
+      remove_problem_from_user(ctx, &user_id).await?;
+      skip_response!();
+      return Ok(())
+    } else {
+      error_response!(ctx, msg, format!("Wrong option argument, please try -force or -f"));
+      return Ok(())
+    }
+  }
+  
+  if user.last_time_since_challange.unwrap().elapsed().unwrap() < CHALLANGE_DURATION {
+    let current_time = SystemTime::now();
+    let can_skip_time = user.last_time_since_challange.unwrap() + CHALLANGE_DURATION;
+    let elapsed_time = can_skip_time.duration_since(current_time).unwrap();
+    let seconds = elapsed_time.as_secs() % 60;
+    let minutes = (elapsed_time.as_secs() / 60) % 60;
+    let hours = ((elapsed_time.as_secs() / 60) / 60) % 60;
+    error_response!(ctx, msg, format!("Keep trying, you still have {:0>2}h {:0>2}m {:0>2}s left", hours, minutes, seconds));
+    return Ok(());
+  }
+
+  remove_problem_from_user(ctx, &user_id).await?;
+  skip_response!();
+
+  Ok(())
+}

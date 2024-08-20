@@ -182,7 +182,7 @@ pub async fn get_user_submission(user: &String, submission_count : i32) -> Resul
   }
 }
 
-async fn check_user_registration(ctx: &Context, msg: &Message, problem: &Problem, client: &Client, user: &String) -> Result<(), ()> {
+async fn check_user_registration(ctx: &Context, msg: &Message, problem: &Problem, user: &String) -> Result<(), ()> {
   let submission_count = 1;
   match get_api_submission_response(submission_count, &user).await {
     Err(why) => {
@@ -306,7 +306,6 @@ async fn validate(ctx: &Context, msg: &Message, user: &String) -> bool {
 
 #[command]
 async fn handle(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-  let client = Client::new();
   let user = args.parse::<String>()?;
   let ctx_clone = ctx.clone();
   let msg_clone = msg.clone();
@@ -319,7 +318,7 @@ async fn handle(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     match problem_result {
       Ok(problem) => {
         sleep(Duration::from_millis(wait_time * 1000)).await;
-        let _ = check_user_registration(&ctx_clone, &msg_clone, &problem, &client, &user).await;
+        let _ = check_user_registration(&ctx_clone, &msg_clone, &problem, &user).await;
       },
       Err(_) => {
         return;

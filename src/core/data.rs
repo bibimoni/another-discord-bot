@@ -75,7 +75,6 @@ pub async fn update_json(ctx: &Context) -> io::Result<()> {
     };
     buffer.flush().await?;
   }
-  
   Ok(())
 }
 
@@ -132,20 +131,32 @@ pub async fn add_user_to_data(ctx: &Context, user_id: &String, handle: &String) 
   Ok(())
 }
 
-pub async fn add_problem_to_user(ctx: &Context, user_id: &String, problem: &Problem) -> SerdeResult<()>{
+pub async fn add_problem_to_user(ctx: &Context, user_id: &String, problem_to_add: Option<&Problem>) -> SerdeResult<()> {
   {
     let data_read = ctx.data.read().await;
     let user_data_lock = data_read.get::<UserData>().expect("Expect UserData in TypeMap").clone();
     let mut user_data = user_data_lock.write().await;
     user_data.data.iter_mut().for_each(|user| {
       if &user.userId == user_id {
-        user.active_challange = Some(problem.clone());
-        user.last_time_since_challange = Some(SystemTime::now());
+        match problem_to_add {
+          Some(problem) => {
+            user.active_challange = Some(problem.clone());
+            user.last_time_since_challange = Some(SystemTime::now());
+          },
+          None => {
+            user.active_challange = None;
+            user.last_time_since_challange = None;
+          }
+        }
       }
     });
   }
   let _ = update_json(ctx).await;
   Ok(())
+}
+
+pub async fn remove_problem_from_user(ctx: &Context, user_id: &String) -> SerdeResult<()> {
+  return add_problem_to_user(&ctx, &user_id, None).await;
 }
 
 // add json data to the global UserData struct from user.json
