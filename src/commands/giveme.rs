@@ -5,7 +5,7 @@ use serenity::prelude::*;
 use serenity::model::prelude::*;
 
 use std::time::SystemTime;
-use tokio::time::{sleep, Duration};
+use tokio::time::Duration;
 
 use tracing::{error, info, warn};
 
@@ -22,6 +22,17 @@ use crate::error_response;
 
 const CHALLANGE_DURATION : Duration = Duration::from_millis(1000 * 60 * 30);
 const RANDOMIZE_CONSTANT : f64 = 9.5;
+
+// 800 -> 3500
+static POINTS_TABLE: [u64; 28] = [1, 2, 3, 3, 4, 4, 6,
+   8, 8, 10, 11, 15, 20, 22,
+   27, 35, 40, 49, 57, 75, 90,
+   103, 119, 137, 154, 170, 188, 200];
+
+// random function
+fn weight (x: usize, n: usize, alpha: f64) -> f64{
+  f64::powf(x as f64 / n as f64, alpha) * n as f64 + 1 as f64
+}
 
 async fn show_help() -> CreateMessage {
   let embed = CreateEmbed::new()
@@ -85,7 +96,7 @@ async fn recommend_problem(user: &String, mut rating_range : u32) -> Result<Prob
     return Err(why);
   }
   let mut problems = problems_wrap.unwrap();
-  rating_range = (rating_range / 100) * 100;
+  rating_range = ((rating_range + 100 - 1) / 100) * 100;
   problems = problems.into_iter().filter(|problem| {
     if let Some(rating) = problem.rating {
       return rating == rating_range as i32;
@@ -104,7 +115,8 @@ async fn recommend_problem(user: &String, mut rating_range : u32) -> Result<Prob
     !user_submission.iter().any(|submission| 
       submission.problem == *problem 
       && submission.verdict != None 
-      && submission.verdict.clone().unwrap() == "OK" )
+      && submission.verdict.clone().unwrap() == "OK" 
+    )
   }).collect::<Vec<_>>();
     
   if problems.len() == 0 {
@@ -112,11 +124,6 @@ async fn recommend_problem(user: &String, mut rating_range : u32) -> Result<Prob
   }
 
   problems.sort_by(|a, b| a.contestId.unwrap().partial_cmp(&b.contestId.unwrap()).unwrap());
-
-  // random function
-  fn weight (x: usize, n: usize, alpha: f64) -> f64{
-    f64::powf(x as f64 / n as f64, alpha) * n as f64 + 1 as f64
-  }
 
   let mut weights = Vec::<f64>::new();
 
@@ -260,7 +267,7 @@ pub async fn skip(ctx: &Context, msg: &Message, mut args : Args) -> CommandResul
     let seconds = elapsed_time.as_secs() % 60;
     let minutes = (elapsed_time.as_secs() / 60) % 60;
     let hours = ((elapsed_time.as_secs() / 60) / 60) % 60;
-    error_response!(ctx, msg, format!("Keep trying, you still have {:0>2}h {:0>2}m {:0>2}s left", hours, minutes, seconds));
+    error_response!(ctx, msg, format!("Keep trying, you still have `{:0>2}h {:0>2}m {:0>2}s` left", hours, minutes, seconds));
     return Ok(());
   }
 
@@ -268,4 +275,56 @@ pub async fn skip(ctx: &Context, msg: &Message, mut args : Args) -> CommandResul
   skip_response!();
 
   Ok(())
+}
+
+// TODO: if the user completed the problem, this command will accept it an remove the problem from the user
+#[command]
+pub async fn gotit(ctx: &Context, msg: &Message) -> CommandResult {
+  let user_id = msg.author.id.to_string();
+  let user_wrap = find_user_in_data(&ctx, &user_id).await;
+  if let Err(why) = user_wrap {
+    error_response!(ctx, msg, why);
+    return Ok(());
+  }
+  
+  let user = user_wrap.unwrap();
+  if let Ok(_) = handle_uncomplete_challange(&user).await {
+    error_response!(ctx, msg, format!("You don't have an active challange!"));
+    return Ok(());
+  }
+
+  let submission_count = 99999; // We want to get all user submissions
+  let user_submission_wrap = get_user_submission(&user.handle, submission_count).await;
+  if let Err(why) = user_submission_wrap {
+    error_response!(ctx, msg, why);
+    return Ok(());
+  }
+
+  let submissions = user_submission_wrap.unwrap();
+  let problem = user.active_challange.unwrap();
+  let mut status = false;
+  let mut problem_rating: Option<i32> = None;
+  submissions.iter().for_each(|submission| {
+    if let Some(verdict) = submission.verdict.clone() {
+      if submission.problem == problem && verdict == format!("OK") {
+        problem_rating = problem.rating;
+        status = true;
+      }
+    }
+  });
+  if status == false {
+    error_response!(ctx, msg, format!("You haven't complete the challange, try more"));
+    return Ok(());
+  } else {
+    let points = POINTS_TABLE[(problem_rating.unwrap() / 100 - 8) as usize];
+    add_points_to_user(&ctx, &user_id, points).await;
+    let embed = CreateEmbed::new()
+      .description(format!("Congrats! you have finished the challange and received {pts} point(s)", pts = points))
+      .color(Colour::GOLD);
+    let builder = CreateMessage::new()
+      .content(format!("<@{id}>", id = msg.author.id))
+      .embed(embed);
+    msg.channel_id.send_message(&ctx.http, builder).await?;
+  }
+  Ok(())  
 }

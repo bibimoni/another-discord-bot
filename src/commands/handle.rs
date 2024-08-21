@@ -19,6 +19,7 @@ use crate::{add_user_to_data, get_problemset, UserData};
 use crate::utils::message_creator::*;
 use crate::error_response;
 
+const WAIT_TIME: u64 = 60;
 
 #[allow(non_snake_case)]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -309,7 +310,6 @@ async fn handle(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
   let user = args.parse::<String>()?;
   let ctx_clone = ctx.clone();
   let msg_clone = msg.clone();
-  let wait_time = 60; // in seconds
   tokio::spawn(async move {
     if (validate(&ctx_clone, &msg_clone, &user)).await == false {
       return;
@@ -317,7 +317,7 @@ async fn handle(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let problem_result = suggest_problem(&ctx_clone, &msg_clone).await;
     match problem_result {
       Ok(problem) => {
-        sleep(Duration::from_millis(wait_time * 1000)).await;
+        sleep(Duration::from_millis(WAIT_TIME * 1000)).await;
         let _ = check_user_registration(&ctx_clone, &msg_clone, &problem, &user).await;
       },
       Err(_) => {

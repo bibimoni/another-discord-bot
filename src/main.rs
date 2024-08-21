@@ -89,6 +89,7 @@ async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
   rating, 
   command_counter, 
   giveme,
+  gotit,
   skip
 )]
 struct General;

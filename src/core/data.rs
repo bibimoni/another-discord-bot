@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 pub struct User {
   pub userId : String, 
   pub handle : String,
+  pub challange_score: u64,
   pub active_challange: Option<Problem>,
   pub last_time_since_challange: Option<SystemTime>,
 }
@@ -57,12 +58,10 @@ pub async fn update_json(ctx: &Context) -> io::Result<()> {
   let user_data = user_data_lock.read().await;
   let user_data_json = serde_json::to_string(&(*user_data));
   let data = user_data_json.unwrap();
-  error!("user_data_json: {:?}", data);
   let file = match OpenOptions::new().write(true).open("user.json").await {
     Ok(f) => f,
     Err(_) => { File::create("user.json").await? }
   };
-  info!("finished getting the file object: {:?}", file);
   {
     let mut buffer = BufWriter::new(file);
     match buffer.write_all(&data.as_bytes()).await {
@@ -84,17 +83,15 @@ pub async fn add_test_data(ctx: &Context) -> SerdeResult<()> {
   let data = r#"
   {
     "userId" : "testid",
-    "handle" : "testhandle"
+    "handle" : "testhandle",
+    "channalge_score": 0
   }"#;
-  // info!("Called add test data, the new data : {:?}", data);
   let test_data : User = serde_json::from_str(data).unwrap();
-  // info!("Test data: {:#?}", test_data);
   {
     let data_read = ctx.data.read().await;
     let user_data_lock = data_read.get::<UserData>().expect("Expect UserData in TypeMap").clone();
     let mut user_data = user_data_lock.write().await;
     user_data.data.push(test_data.clone());
-    // info!("New data: {:?}", user_data);
   }
   Ok(())
 }
@@ -105,23 +102,20 @@ pub async fn add_user_to_data(ctx: &Context, user_id: &String, handle: &String) 
     let data = format!(r#"
     {{
       "userId" : "{user_id}",
-      "handle" : "{handle}"
-    }}"#, user_id = user_id, handle = handle);
-    // info!("Called add test data, the new data : {:?}", data);
+      "handle" : "{handle}",
+      "challange_score": {pts}
+    }}"#, user_id = user_id, handle = handle, pts = 0);
     let test_data : User = serde_json::from_str(&data).unwrap();
     let data_read = ctx.data.read().await;
     let user_data_lock;
-    // info!("Test data: {:#?}", test_data);
     match data_read.get::<UserData>() {
       Some(data) => {
         user_data_lock = data.clone();
         let mut user_data = user_data_lock.write().await;
         user_data.data.push(test_data.clone());
-        // info!("New data: {:?}", user_data);
       },
       None => {
         let user_data = Data {data : Vec::from([test_data])};
-        // info!("New data: {:?}", user_data);
         let mut data = ctx.data.write().await;
         data.insert::<UserData>(Arc::new(RwLock::new(user_data)));
       }
@@ -155,6 +149,21 @@ pub async fn add_problem_to_user(ctx: &Context, user_id: &String, problem_to_add
   Ok(())
 }
 
+pub async fn add_points_to_user(ctx: &Context, user_id: &String, points: u64) {
+  {
+    let data_read = ctx.data.read().await;
+    let user_data_lock = data_read.get::<UserData>().expect("Expect UserData in TypeMap");
+    let mut user_data = user_data_lock.write().await;
+    user_data.data.iter_mut().for_each(|user| {
+      if &user.userId == user_id {
+        user.challange_score += points as u64;
+      }
+    });
+  }
+
+  let _ = update_json(ctx).await;
+}
+
 pub async fn remove_problem_from_user(ctx: &Context, user_id: &String) -> SerdeResult<()> {
   return add_problem_to_user(&ctx, &user_id, None).await;
 }
@@ -169,9 +178,7 @@ pub async fn initialize_data(client : &Client) -> io::Result<()> {
   let mut buffer = vec![0; file.metadata().await?.len() as usize];
 
   let _ = file.read(&mut buffer).await?;
-  // info!("length of file: {}", file.metadata().await?.len());
   let json_str = String::from_utf8(buffer).expect("Failed to convert buffer to string");
-  // info!("json string is: {:?}", &json_str);
   {
     let mut data = client.data.write().await;
     
@@ -189,8 +196,6 @@ pub async fn initialize_data(client : &Client) -> io::Result<()> {
       return Ok(()); 
     } 
   };
-  // let user_data_debug = &user_data;
-  // info!("data: {:?}", user_data_debug);
   {
     let mut data = client.data.write().await;
     data.insert::<UserData>(Arc::new(RwLock::new(user_data)));
