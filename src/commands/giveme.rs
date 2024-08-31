@@ -14,6 +14,8 @@ use rand::prelude::*;
 
 use reqwest::Client;
 
+use std::cmp;
+
 use crate::commands::rating::*;
 use crate::core::data::{self, *, User};
 use crate::utils::message_creator::*;
@@ -22,6 +24,8 @@ use crate::error_response;
 
 const CHALLANGE_DURATION : Duration = Duration::from_millis(1000 * 60 * 30);
 const RANDOMIZE_CONSTANT : f64 = 9.5;
+const MAX_RATING : u32 = 3500;
+const MIN_RATING : u32 = 800;
 
 // 800 -> 3500
 static POINTS_TABLE: [u64; 28] = [1, 2, 3, 3, 4, 4, 6,
@@ -37,20 +41,20 @@ fn weight (x: usize, n: usize, alpha: f64) -> f64{
 async fn show_help() -> CreateMessage {
   let embed = CreateEmbed::new()
     .title(format!("Usage of `giveme`"))
-    .description(format!("`;giveme practice [rating]`\n`;giveme challange [delta]`\n`;giveme help`"))
+    .description(format!("`;giveme practice [rating / ranting_range]`\n`;giveme challenge [delta / delta_range]`\n`;giveme help`"))
     .color(Colour::DARK_GREEN);
   let builder = CreateMessage::new()
     .embed(embed);
   builder
 }
 
-async fn find_user_in_data(ctx: &Context, user_id: &String) -> Result<User, String> {
+pub async fn find_user_in_data(ctx: &Context, user_id: &String) -> Result<User, String> {
   let data_wrap = get_data(&ctx).await;
   if let Err(why) = data_wrap {
     return Err(why);
   } 
   let data = data_wrap.unwrap();
-  info!("Data: {:?}", data);
+  // info!("Data: {:?}", data);
   if data.data.len() == 0 || !data.data.iter().any(|user| &user.userId == user_id) {
     return Err(format!("Please register your codeforces handle before using the command!"));
   }
@@ -82,15 +86,16 @@ pub async fn get_problemset() -> Result<Vec<Problem>, String> {
   }
 } 
 
-async fn handle_uncomplete_challange(user: &User) -> Result<(), String> {
-  if user.active_challange == None || user.last_time_since_challange == None {
+async fn handle_uncomplete_challenge(user: &User) -> Result<(), String> {
+  if user.active_challenge == None || user.last_time_since_challenge == None {
     return Ok(());
   }
-  return Err(format!("You still have an active challange!"));
+  return Err(format!("You still have an active challenge!"));
 }
 
+// TODO: return a vector of unsolved problems for some user within the `rating_range` (first half of the current `recommend problem`) in sorted order
 
-async fn recommend_problem(user: &String, mut rating_range : u32) -> Result<Problem, String> {
+pub async fn get_problems(user: &String, mut rating_range: u32) -> Result<Vec<Problem>, String> {
   let problems_wrap = get_problemset().await;
   if let Err(why) = problems_wrap {
     return Err(why);
@@ -124,7 +129,11 @@ async fn recommend_problem(user: &String, mut rating_range : u32) -> Result<Prob
   }
 
   problems.sort_by(|a, b| a.contestId.unwrap().partial_cmp(&b.contestId.unwrap()).unwrap());
+  Ok(problems)
+}
 
+// Vec<Problem> needs to be sorted 
+pub fn get_problem_with_weights(problems: Vec<Problem>) -> Problem {
   let mut weights = Vec::<f64>::new();
 
   for i in 0..problems.len() {
@@ -134,7 +143,18 @@ async fn recommend_problem(user: &String, mut rating_range : u32) -> Result<Prob
   let distribution = WeightedIndex::new(&weights).unwrap();
   let mut rng = thread_rng();
 
-  Ok(problems[distribution.sample(&mut rng)].clone())
+  problems[distribution.sample(&mut rng)].clone()
+}
+
+async fn recommend_problem(user: &String, rating_range : u32) -> Result<Problem, String> {
+  match get_problems(&user, rating_range).await {
+    Ok(problems) => {
+      return Ok(get_problem_with_weights(problems));
+    },
+    Err(why) => {
+      return Err(why);
+    }
+  }
 }
 
 #[command]
@@ -143,11 +163,11 @@ async fn giveme(ctx: &Context, msg: &Message, mut args : Args) -> CommandResult 
   let give_type;
   macro_rules! wrong_argument {
       () => {
-        let message = create_error_response(format!("Please provide `help`, `challage` or `practice` as argument"), &msg);
+        let message = create_error_response(format!("Please provide `help`, `challenge` or `practice` as argument"), &msg);
         msg.channel_id.send_message(&ctx.http, message).await?;
       };
   }
-  let arg_list = Vec::from(["practice", "p", "challange", "c", "help", "h"]);
+  let arg_list = Vec::from(["practice", "p", "challenge", "c", "help", "h"]);
   match give_type_arg {
     Ok(return_type) => {
       if arg_list.iter().any(|arg| arg.to_string() == return_type) == false {
@@ -175,9 +195,11 @@ async fn giveme(ctx: &Context, msg: &Message, mut args : Args) -> CommandResult 
     return Ok(());
   }
   let user = user_wrap.unwrap();
-  if let Err(why) = handle_uncomplete_challange(&user).await {
-    error_response!(ctx, msg, why);
-    return Ok(());
+  if give_type == "c" || give_type == "challenge" {
+    if let Err(why) = handle_uncomplete_challenge(&user).await {
+      error_response!(ctx, msg, why);
+      return Ok(());
+    }
   }
   
   let mut rating : Option<u32>;
@@ -188,13 +210,32 @@ async fn giveme(ctx: &Context, msg: &Message, mut args : Args) -> CommandResult 
       return Ok(());
     }
   }
-  if give_type == "challange" || give_type == "c" {
-    if let Err(why) = handle_uncomplete_challange(&user).await {
+
+  let mut rating_range : Option<u32>;
+  match args.single::<u32>() {
+    Ok(range) => {
+      rating_range = Some(range);
+    },
+    Err(_) => {
+      rating_range = None;
+    }
+  }
+
+  if rating_range != None && rating.unwrap() > rating_range.unwrap() {
+    error_response!(ctx, msg, format!("Please enter a valid rating range"));
+    return Ok(());
+  }
+  
+  if give_type == "challenge" || give_type == "c" {
+    if let Err(why) = handle_uncomplete_challenge(&user).await {
       error_response!(ctx, msg, why);
     }
     match get_user_rating(&user.handle).await {
       Ok(codeforces_rating) => {
         rating = Some(codeforces_rating + rating.unwrap());
+        if rating_range != None {
+          rating_range = Some(codeforces_rating + rating_range.unwrap());
+        }
       },
       Err(why) => {
         error_response!(ctx, msg, why);
@@ -203,16 +244,31 @@ async fn giveme(ctx: &Context, msg: &Message, mut args : Args) -> CommandResult 
     }
   }
 
+  if rating_range != None {
+    rating_range = Some(cmp::min(rating_range.unwrap(), MAX_RATING));
+  }
+
+  rating = Some(cmp::max(rating.unwrap(), MIN_RATING));
+
+  if rating_range != None && rating_range.unwrap() < rating.unwrap() {
+    rating_range = rating;
+  }
+
   if let None = rating {
     error_response!(ctx, msg, format!("Unexpected error!"));
     return Ok(());
   }
+  if rating_range != None {
+    rating = Some(thread_rng().gen_range(rating.unwrap()..=rating_range.unwrap()));
+  }
+
+  rating = Some(cmp::min(cmp::max(rating.unwrap(), MIN_RATING), MAX_RATING));
 
   match recommend_problem(&user.handle, rating.unwrap()).await {
     Ok(problem) => {
       let message = create_problem_message(&problem, format!("We recommended this problem for you"), true).unwrap();
       msg.channel_id.send_message(&ctx.http, message).await?;
-      if give_type == "challange" || give_type == "c" {
+      if give_type == "challenge" || give_type == "c" {
         add_problem_to_user(&ctx, &user_id, Some(&problem)).await?;
       }
     },
@@ -243,8 +299,8 @@ pub async fn skip(ctx: &Context, msg: &Message, mut args : Args) -> CommandResul
     return Ok(());
   }
   let user = user_wrap.unwrap();
-  if user.active_challange == None || user.last_time_since_challange == None {
-    error_response!(ctx, msg, format!("You don't have an active challange to skip"));
+  if user.active_challenge == None || user.last_time_since_challenge == None {
+    error_response!(ctx, msg, format!("You don't have an active challenge to skip"));
     return Ok(());
   }
   let force_option = args.single::<String>();
@@ -260,13 +316,11 @@ pub async fn skip(ctx: &Context, msg: &Message, mut args : Args) -> CommandResul
     }
   }
   
-  if user.last_time_since_challange.unwrap().elapsed().unwrap() < CHALLANGE_DURATION {
+  if user.last_time_since_challenge.unwrap().elapsed().unwrap() < CHALLANGE_DURATION {
     let current_time = SystemTime::now();
-    let can_skip_time = user.last_time_since_challange.unwrap() + CHALLANGE_DURATION;
+    let can_skip_time = user.last_time_since_challenge.unwrap() + CHALLANGE_DURATION;
     let elapsed_time = can_skip_time.duration_since(current_time).unwrap();
-    let seconds = elapsed_time.as_secs() % 60;
-    let minutes = (elapsed_time.as_secs() / 60) % 60;
-    let hours = ((elapsed_time.as_secs() / 60) / 60) % 60;
+    let (seconds, minutes, hours) = convert_to_hms(&elapsed_time);
     error_response!(ctx, msg, format!("Keep trying, you still have `{:0>2}h {:0>2}m {:0>2}s` left", hours, minutes, seconds));
     return Ok(());
   }
@@ -277,7 +331,35 @@ pub async fn skip(ctx: &Context, msg: &Message, mut args : Args) -> CommandResul
   Ok(())
 }
 
-// TODO: if the user completed the problem, this command will accept it an remove the problem from the user
+pub fn convert_to_hms(elapsed_time: &Duration) -> (u64, u64, u64) {
+  (elapsed_time.as_secs() % 60, (elapsed_time.as_secs() / 60) % 60, ((elapsed_time.as_secs() / 60) / 60) % 60)
+}
+
+pub async fn check_complete_problem(user: &User, problem: &Problem) -> Result<(bool, i32), String> {
+  let submission_count = 99999; // We want to get all user submissions
+  let user_submission_wrap = get_user_submission(&user.handle, submission_count).await;
+  if let Err(why) = user_submission_wrap {
+    // error_response!(ctx, msg, why);
+    return Err(why);
+  }
+
+  let submissions = user_submission_wrap.unwrap();
+  let mut status = false;
+  let mut problem_rating: Option<i32> = None;
+  submissions.iter().for_each(|submission| {
+    if let Some(verdict) = submission.verdict.clone() {
+      if submission.problem == *problem && verdict == format!("OK") {
+        problem_rating = problem.rating;
+        status = true;
+      }
+    }
+  });
+  if status == false {
+    return Err(format!("The problem hasn't been completed"));
+  }
+  Ok((status, problem_rating.unwrap()))
+}
+
 #[command]
 pub async fn gotit(ctx: &Context, msg: &Message) -> CommandResult {
   let user_id = msg.author.id.to_string();
@@ -288,43 +370,30 @@ pub async fn gotit(ctx: &Context, msg: &Message) -> CommandResult {
   }
   
   let user = user_wrap.unwrap();
-  if let Ok(_) = handle_uncomplete_challange(&user).await {
-    error_response!(ctx, msg, format!("You don't have an active challange!"));
+  if let Ok(_) = handle_uncomplete_challenge(&user).await {
+    error_response!(ctx, msg, format!("You don't have an active challenge!"));
     return Ok(());
   }
-
-  let submission_count = 99999; // We want to get all user submissions
-  let user_submission_wrap = get_user_submission(&user.handle, submission_count).await;
-  if let Err(why) = user_submission_wrap {
+  let problem = user.clone().active_challenge.unwrap();
+  let status = check_complete_problem(&user, &problem).await;
+  if let Err(why) = status {
     error_response!(ctx, msg, why);
     return Ok(());
   }
-
-  let submissions = user_submission_wrap.unwrap();
-  let problem = user.active_challange.unwrap();
-  let mut status = false;
-  let mut problem_rating: Option<i32> = None;
-  submissions.iter().for_each(|submission| {
-    if let Some(verdict) = submission.verdict.clone() {
-      if submission.problem == problem && verdict == format!("OK") {
-        problem_rating = problem.rating;
-        status = true;
-      }
-    }
-  });
-  if status == false {
-    error_response!(ctx, msg, format!("You haven't complete the challange, try more"));
+  if status.clone().unwrap().0 == false {
+    error_response!(ctx, msg, format!("You haven't complete the challenge, try more"));
     return Ok(());
   } else {
-    let points = POINTS_TABLE[(problem_rating.unwrap() / 100 - 8) as usize];
+    let points = POINTS_TABLE[(status.unwrap().1 / 100 - 8) as usize];
     add_points_to_user(&ctx, &user_id, points).await;
     let embed = CreateEmbed::new()
-      .description(format!("Congrats! you have finished the challange and received {pts} point(s)", pts = points))
+      .description(format!("Congrats! you have finished the challenge and received {pts} point(s)", pts = points))
       .color(Colour::GOLD);
     let builder = CreateMessage::new()
       .content(format!("<@{id}>", id = msg.author.id))
       .embed(embed);
     msg.channel_id.send_message(&ctx.http, builder).await?;
+    remove_problem_from_user(ctx, &user_id).await?;
   }
   Ok(())  
 }

@@ -19,9 +19,11 @@ use crate::commands::message::*;
 use crate::commands::ping::*;
 use crate::commands::math::*;
 use crate::commands::rating::*;
-use crate::commands::commandcounter::*;
 use crate::commands::handle::*;
 use crate::commands::giveme::*;
+use crate::commands::help::*;
+use crate::commands::latency::*;
+use crate::commands::duel::*;
 
 use crate::core::data::*;
 
@@ -33,9 +35,10 @@ struct Handler;
 
 #[async_trait]
 impl EventHandler for Handler {
-  async fn ready(&self, _: Context, ready: Ready) {
+  async fn ready(&self, ctx: Context, ready: Ready) {
     // Log at the INFO level. This is a macro from the `tracing` crate.
     info!("{} is connected!", ready.user.name);
+    duel_interactor(&ctx).await;
   }
 
   // For instrument to work, all parameters must implement Debug.
@@ -48,7 +51,7 @@ impl EventHandler for Handler {
     //
     // In this example, this will not show up in the logs because DEBUG is
     // below INFO, which is the set debug level.
-    debug!("Resumed");
+    info!("Resumed");
   }
 }
 
@@ -58,24 +61,9 @@ impl EventHandler for Handler {
 // This additional information includes the function name, along with all it's arguments formatted
 // with the Debug impl. This additional information will also only be shown if the LOG level is set
 // to `debug`
-// #[instrument]
+#[instrument]
 async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
   info!("Running command `{command_name}` invoked by {}", msg.author.tag());
-  let counter_lock;
-  let data_read = ctx.data.read().await;
-  match data_read.get::<CommandCounter>() {
-    Some(data) => counter_lock = data.clone(),
-    None => { return true; }
-  }
-  {
-    let mut counter = counter_lock.write().await;
-    let entry = counter.entry(command_name.to_string()).or_insert(0);
-    *entry += 1;
-  }
-
-  // add some data to test
-  // let _ = add_test_data(ctx).await;
-  // 
 
   true
 }
@@ -87,10 +75,11 @@ async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
   message, 
   multiply, 
   rating, 
-  command_counter, 
   giveme,
   gotit,
-  skip
+  skip,
+  latency,
+  duel
 )]
 struct General;
 
@@ -118,7 +107,7 @@ async fn main() {
     Err(why) => panic!("Could not access application info: {:?}", why),
   };
 
-  let framework = StandardFramework::new().before(before).group(&GENERAL_GROUP);
+  let framework = StandardFramework::new().before(before).group(&GENERAL_GROUP).help(&MY_HELP);
   framework.configure(Configuration::new().owners(owners).prefix("~"));
 
   let intents = GatewayIntents::GUILD_MESSAGES
