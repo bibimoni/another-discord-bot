@@ -8,6 +8,7 @@ use serenity::gateway::ShardManager;
 use tokio::fs::File;
 use tokio::io::{self, BufWriter, AsyncWriteExt, AsyncReadExt};
 use tokio::fs::OpenOptions;
+use tokio::time::Duration;
 
 use crate::commands::handle::*;
 
@@ -29,14 +30,52 @@ pub struct User {
   pub duel_id : Option<usize>, 
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+pub enum DuelType {
+  DUEL,
+  LOCKOUT
+}
+
 #[allow(non_snake_case)]
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Duel {
   pub duel_id : usize,
   pub players : Vec<User>,
   pub begin_time : SystemTime,
-  pub problem : Problem,
+  pub problems : Vec<Problem>,
   pub channel_id : Message,
+  pub duel_type : DuelType,
+  pub score_distribution : Option<Vec<u32>>,
+  pub match_duration : Option<Duration>,
+  pub problems_point : Option<Vec<u32>>
+}
+
+impl Duel {
+  pub fn set_point(&mut self, index: usize) {
+    if let Some( ref mut points) = self.problems_point {
+      if let Some(element) = points.get_mut(index) {
+        *element = 0;
+      }
+    }
+  }
+  pub fn add_score(&mut self, index: usize, del: u32) {
+    if let Some( ref mut scores ) = self.score_distribution {
+      if let Some(score) = scores.get_mut(index) {
+        *score += del;
+      }
+    }
+  }
+  pub fn remove_user(&mut self, user_id: String) {
+    let index = self.players.iter().position(| user | *user.userId == user_id );
+    if index == None {
+      return;
+    }
+    self.players.remove(index.unwrap());
+    if let Some( ref mut scores ) = self.score_distribution {
+      scores.remove(index.unwrap());
+    }
+    info!("{:?}", self.players);
+  }
 }
 
 impl PartialEq for Duel {
@@ -44,7 +83,7 @@ impl PartialEq for Duel {
       self.duel_id == other.duel_id 
       && self.players == other.players
       && self.begin_time == other.begin_time
-      && self.problem == other.problem
+      && self.problems == other.problems
   }
 }
 
@@ -78,7 +117,8 @@ pub async fn update_json(ctx: &Context) -> io::Result<()> {
   let user_data = user_data_lock.read().await;
   let user_data_json = serde_json::to_string(&(*user_data));
   let data = user_data_json.unwrap();
-  let file = match OpenOptions::new().write(true).open("user.json").await {
+  // warn!("Data: {:?}", data);
+  let file = match OpenOptions::new().write(true).truncate(true).open("user.json").await {
     Ok(f) => f,
     Err(_) => { File::create("user.json").await? }
   };
@@ -115,7 +155,6 @@ pub async fn add_test_data(ctx: &Context) -> SerdeResult<()> {
   }
   Ok(())
 }
-
 
 pub async fn add_user_to_data(ctx: &Context, user_id: &String, handle: &String) -> SerdeResult<()> {
   {
@@ -183,22 +222,28 @@ pub async fn get_duel(ctx: &Context, duel_id: usize) -> Option<Duel> {
   None
 }
 
-pub async fn edit_duel(ctx: &Context, msg: Option<&Message>, users: &Vec<User>, problem: Option<&Problem>) {
+pub async fn edit_duel(
+  ctx: &Context, 
+  msg: Option<&Message>, 
+  users: &Vec<User>, 
+  problems: Option<Vec<Problem>>, 
+  duration: Option<Duration>,
+  problems_score: Option<Vec<u32>>
+) {
   {
     let data_read = ctx.data.read().await;
     let user_data_lock = data_read.get::<UserData>().expect("Expect UserData in Type Map");
     let mut user_data = user_data_lock.write().await;
-    if problem == None {
+    if problems == None {
+
       let mut duel_id_to_be_removed : Vec<usize> = Vec::new();
       let mut new_user_data_duels: Vec<Duel> = Vec::new();
-      for user_to_delete in users.iter() {
-        for duel in user_data.duels.iter() {
+      for duel in user_data.duels.iter() {
+        for user_to_delete in users.iter() {
 
           if user_to_delete.duel_id == None {
-            error!("user doesnt have a duel_id: {:?}", user_to_delete);
             continue;
           }
-
           if user_to_delete.duel_id.unwrap() == duel.duel_id {
             duel_id_to_be_removed.push(duel.duel_id);
           } else {
@@ -212,26 +257,34 @@ pub async fn edit_duel(ctx: &Context, msg: Option<&Message>, users: &Vec<User>, 
       user_data.data.iter_mut().for_each(|user| {
         if user.duel_id != None && duel_id_to_be_removed.contains(&user.duel_id.unwrap()) {
           user.duel_id = None;
+
         }
       });
 
     } else {
       let duels = user_data.duels.clone();
       let new_duel_id = generate_duel_id(&duels.clone());
+      let mut users_to_duel = users.clone();
       let current = SystemTime::now();
-      for user_to_add in users.iter() {
+      for user_to_add in users_to_duel.iter_mut() {
         user_data.data.iter_mut().for_each(|user| {
           if user == user_to_add {
             user.duel_id = Some(new_duel_id);
+            user_to_add.duel_id = Some(new_duel_id);
           }
         })
       }
+      let number_of_problems = problems.clone().unwrap().len();
       user_data.duels.push(Duel {
         duel_id: new_duel_id,
-        players: users.clone(),
+        players: users_to_duel,
         begin_time: current, 
-        problem: problem.unwrap().clone(),
-        channel_id : msg.unwrap().clone()
+        problems: problems.unwrap(),
+        channel_id : msg.unwrap().clone(),
+        duel_type: (if number_of_problems == 1 { DuelType::DUEL } else { DuelType::LOCKOUT }),
+        score_distribution: if number_of_problems == 1 { None } else { Some(vec![0; number_of_problems]) },
+        match_duration: duration,
+        problems_point: problems_score
       })
     }
   }
@@ -239,11 +292,19 @@ pub async fn edit_duel(ctx: &Context, msg: Option<&Message>, users: &Vec<User>, 
 }
 
 pub async fn create_duel(ctx: &Context, msg: &Message, users: Vec<User>, problem: &Problem) {
-  edit_duel(&ctx, Some(&msg), &users, Some(&problem)).await;
+  edit_duel(&ctx, Some(&msg), &users, Some(Vec::from([problem.clone()])), None, None).await;
+}
+
+pub async fn create_lockout(ctx: &Context, msg: &Message, users: Vec<User>, problems: &Vec<Problem>, duration: Duration, problems_point: Vec<u32>) {
+  edit_duel(&ctx, Some(&msg), &users, Some(problems.clone()), Some(duration), Some(problems_point)).await;
 }
 
 pub async fn remove_duel(ctx: &Context, users: Vec<User>) {
-  edit_duel(&ctx, None, &users, None).await;
+  edit_duel(&ctx, None, &users, None, None, None).await;
+}
+
+pub async fn remove_lockout(ctx: &Context, users: Vec<User>) {
+  remove_duel(&ctx, users).await;
 }
 
 pub async fn add_problem_to_user(ctx: &Context, user_id: &String, problem_to_add: Option<&Problem>) -> SerdeResult<()> {

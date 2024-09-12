@@ -22,6 +22,7 @@ pub async fn message(ctx: &Context, msg: &Message) -> CommandResult {
     .content("Hello there")
     .embed(embed)
     .add_file(CreateAttachment::path("./ferris_eyes.png").await.unwrap());
+  
   msg.channel_id.say(&ctx.http, "test").await?;
   let msg = msg.channel_id.send_message(&ctx.http, builder).await;
   

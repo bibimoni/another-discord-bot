@@ -7,3 +7,4 @@ pub mod giveme;
 pub mod help;
 pub mod latency;
 pub mod duel;
+pub mod lockout;

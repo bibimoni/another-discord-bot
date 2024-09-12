@@ -67,7 +67,7 @@ struct Author {
 pub struct Submission {
   id: u64,
   contestId: Option<u32>,
-  creationTimeSeconds: u64,
+  pub creationTimeSeconds: u64,
   relativeTimeSeconds: u64,
   pub problem: Problem,
   author: Author,

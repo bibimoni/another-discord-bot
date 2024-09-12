@@ -24,6 +24,7 @@ use crate::commands::giveme::*;
 use crate::commands::help::*;
 use crate::commands::latency::*;
 use crate::commands::duel::*;
+use crate::commands::lockout::*;
 
 use crate::core::data::*;
 
@@ -39,6 +40,7 @@ impl EventHandler for Handler {
     // Log at the INFO level. This is a macro from the `tracing` crate.
     info!("{} is connected!", ready.user.name);
     duel_interactor(&ctx).await;
+    lockout_interactor(&ctx).await;
   }
 
   // For instrument to work, all parameters must implement Debug.
@@ -79,7 +81,8 @@ async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
   gotit,
   skip,
   latency,
-  duel
+  duel,
+  lockout
 )]
 struct General;
 

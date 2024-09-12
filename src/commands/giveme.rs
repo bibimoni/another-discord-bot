@@ -5,6 +5,8 @@ use serenity::prelude::*;
 use serenity::model::prelude::*;
 
 use std::time::SystemTime;
+use std::cmp;
+
 use tokio::time::Duration;
 
 use tracing::{error, info, warn};
@@ -14,7 +16,6 @@ use rand::prelude::*;
 
 use reqwest::Client;
 
-use std::cmp;
 
 use crate::commands::rating::*;
 use crate::core::data::{self, *, User};
@@ -24,8 +25,8 @@ use crate::error_response;
 
 const CHALLANGE_DURATION : Duration = Duration::from_millis(1000 * 60 * 30);
 const RANDOMIZE_CONSTANT : f64 = 9.5;
-const MAX_RATING : u32 = 3500;
-const MIN_RATING : u32 = 800;
+pub const MAX_RATING : u32 = 3500;
+pub const MIN_RATING : u32 = 800;
 
 // 800 -> 3500
 static POINTS_TABLE: [u64; 28] = [1, 2, 3, 3, 4, 4, 6,
@@ -335,7 +336,7 @@ pub fn convert_to_hms(elapsed_time: &Duration) -> (u64, u64, u64) {
   (elapsed_time.as_secs() % 60, (elapsed_time.as_secs() / 60) % 60, ((elapsed_time.as_secs() / 60) / 60) % 60)
 }
 
-pub async fn check_complete_problem(user: &User, problem: &Problem) -> Result<(bool, i32), String> {
+pub async fn check_complete_problem(user: &User, problem: &Problem) -> Result<(bool, i32, u64), String> {
   let submission_count = 99999; // We want to get all user submissions
   let user_submission_wrap = get_user_submission(&user.handle, submission_count).await;
   if let Err(why) = user_submission_wrap {
@@ -346,10 +347,16 @@ pub async fn check_complete_problem(user: &User, problem: &Problem) -> Result<(b
   let submissions = user_submission_wrap.unwrap();
   let mut status = false;
   let mut problem_rating: Option<i32> = None;
+  let mut creation_time: Option<u64> = None;
   submissions.iter().for_each(|submission| {
     if let Some(verdict) = submission.verdict.clone() {
       if submission.problem == *problem && verdict == format!("OK") {
         problem_rating = problem.rating;
+        if creation_time == None {
+          creation_time = Some(submission.creationTimeSeconds);
+        } else {
+          creation_time = Some(cmp::min(creation_time.unwrap(), submission.creationTimeSeconds));
+        }
         status = true;
       }
     }
@@ -357,7 +364,7 @@ pub async fn check_complete_problem(user: &User, problem: &Problem) -> Result<(b
   if status == false {
     return Err(format!("The problem hasn't been completed"));
   }
-  Ok((status, problem_rating.unwrap()))
+  Ok((status, problem_rating.unwrap(), creation_time.unwrap()))
 }
 
 #[command]
