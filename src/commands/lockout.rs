@@ -208,6 +208,7 @@ pub async fn single_lockout_interactor(ctx: &Context, mut lockout: Duel) {
       edit_to_lockout_status(&$ctx, &$lockout, $msg, $opt).await;
     };
   }
+  
   let passed_time = lockout.begin_time.elapsed().unwrap();
   let ctx_1 = ctx.clone();
   let msg_1 = msg.clone();
