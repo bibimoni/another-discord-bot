@@ -193,7 +193,7 @@ pub fn create_error_response(text: String, msg: &Message) -> CreateMessage {
     .description(text)
     .timestamp(Timestamp::now());
   let builder = CreateMessage::new()
-    .content(format!("<@{id}>", id = msg.author.id))
+    // .content(format!("<@{id}>", id = msg.author.id))
     .embed(embed);
   builder
 }

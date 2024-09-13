@@ -14,7 +14,6 @@ use rand::prelude::*;
 
 use reqwest::Client;
 
-
 use crate::commands::rating::*;
 use crate::core::data::{self, *, User};
 use crate::utils::message_creator::*;
@@ -92,14 +91,8 @@ async fn handle_uncomplete_challenge(user: &User) -> Result<(), String> {
   return Err(format!("You still have an active challenge!"));
 }
 
-// return a vector of unsolved problems for some user within the `rating_range` 
-// (first half of the current `recommend problem`) in sorted order
-pub async fn get_problems(user: &String, mut rating_range: u32) -> Result<Vec<Problem>, String> {
-  let problems_wrap = get_problemset().await;
-  if let Err(why) = problems_wrap {
-    return Err(why);
-  }
-  let mut problems = problems_wrap.unwrap();
+// the same as get_problems but you give the problemset to filter
+pub async fn get_problems_with_given_problemset(mut rating_range: u32, mut problems: Vec<Problem>, user_submission: Vec<Submission>) -> Result<Vec<Problem>, String> {
   rating_range = ((rating_range + 100 - 1) / 100) * 100;
   problems = problems.into_iter().filter(|problem| {
     if let Some(rating) = problem.rating {
@@ -108,13 +101,7 @@ pub async fn get_problems(user: &String, mut rating_range: u32) -> Result<Vec<Pr
       return false;
     }
   }).collect::<Vec<_>>();
-  let submission_count = 99999; // We want to get all user submissions
-  let user_submission_wrap = get_user_submission(&user, submission_count).await;
-  if let Err(why) = user_submission_wrap {
-    return Err(why);
-  }
   
-  let user_submission = user_submission_wrap.unwrap();
   problems = problems.into_iter().filter(|problem| { 
     !user_submission.iter().any(|submission| 
       submission.problem == *problem 
@@ -129,6 +116,24 @@ pub async fn get_problems(user: &String, mut rating_range: u32) -> Result<Vec<Pr
 
   problems.sort_by(|a, b| a.contestId.unwrap().partial_cmp(&b.contestId.unwrap()).unwrap());
   Ok(problems)
+}
+
+// return a vector of unsolved problems for some user within the `rating_range` 
+// (first half of the current `recommend problem`) in sorted order
+pub async fn get_problems(user: &String, rating_range: u32) -> Result<Vec<Problem>, String> {
+  let problems_wrap = get_problemset().await;
+  if let Err(why) = problems_wrap {
+    return Err(why);
+  }
+  let problems = problems_wrap.unwrap();
+  let submission_count = 99999; // We want to get all user submissions
+  let user_submission_wrap = get_user_submission(&user, submission_count).await;
+  if let Err(why) = user_submission_wrap {
+    return Err(why);
+  }
+  
+  let user_submission = user_submission_wrap.unwrap();
+  get_problems_with_given_problemset(rating_range, problems.clone(), user_submission).await
 }
 
 // Vec<Problem> needs to be sorted 
@@ -334,15 +339,7 @@ pub fn convert_to_hms(elapsed_time: &Duration) -> (u64, u64, u64) {
   (elapsed_time.as_secs() % 60, (elapsed_time.as_secs() / 60) % 60, ((elapsed_time.as_secs() / 60) / 60) % 60)
 }
 
-pub async fn check_complete_problem(user: &User, problem: &Problem) -> Result<(bool, i32, u64), String> {
-  let submission_count = 99999; // We want to get all user submissions
-  let user_submission_wrap = get_user_submission(&user.handle, submission_count).await;
-  if let Err(why) = user_submission_wrap {
-    // error_response!(ctx, msg, why);
-    return Err(why);
-  }
-
-  let submissions = user_submission_wrap.unwrap();
+pub async fn check_complete_problem_with_given_submission(problem: &Problem, submissions: Vec<Submission>) -> Result<(bool, i32, u64), String> {
   let mut status = false;
   let mut problem_rating: Option<i32> = None;
   let mut creation_time: Option<u64> = None;
@@ -363,6 +360,18 @@ pub async fn check_complete_problem(user: &User, problem: &Problem) -> Result<(b
     return Err(format!("The problem hasn't been completed"));
   }
   Ok((status, problem_rating.unwrap(), creation_time.unwrap()))
+}
+
+pub async fn check_complete_problem(user: &User, problem: &Problem) -> Result<(bool, i32, u64), String> {
+  let submission_count = 99999; // We want to get all user submissions
+  let user_submission_wrap = get_user_submission(&user.handle, submission_count).await;
+  if let Err(why) = user_submission_wrap {
+    // error_response!(ctx, msg, why);
+    return Err(why);
+  }
+  let submissions = user_submission_wrap.unwrap();
+
+  check_complete_problem_with_given_submission(problem, submissions.clone()).await
 }
 
 #[command]

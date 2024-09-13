@@ -1,5 +1,5 @@
 use crate::utils::message_creator::*;
-use crate::{create_duel, error_response, find_user_in_data, get_problems, get_user_rating};
+use crate::{create_duel, error_response, find_user_in_data, get_user_rating};
 
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult};
@@ -10,10 +10,10 @@ use serenity::model::prelude::*;
 use serenity::collector::MessageCollector;
 
 use tokio::time::Duration;
-use tracing::{error, warn};
 
 use crate::commands::handle::*;
 use crate::commands::giveme::*;
+use crate::commands::lockout::*;
 
 use crate::core::data::*;
 use crate::core::data::User;
@@ -30,8 +30,10 @@ pub fn extract_user_id(mention: String) -> Option<UserId> {
   }
 }
 
-pub async fn get_problem_for_users(users: &Vec<User>, rating: u32) -> Option<Problem> {
-  let problems_wrap = get_problems(&users[0].handle, rating).await;
+// return a problem with `rating` that all `users` hasn't solved
+// please provide problemset first for better performace
+pub async fn get_problem_for_users(users: &Vec<User>, rating: u32, problem_set: &Vec<Problem>, user_submissions: &Vec<Vec<Submission>>) -> Option<Problem> {
+  let problems_wrap = get_problems_with_given_problemset(rating, problem_set.clone(), user_submissions[0].clone()).await;
 
   let mut problems: Vec<Problem>;
   match problems_wrap {
@@ -44,7 +46,7 @@ pub async fn get_problem_for_users(users: &Vec<User>, rating: u32) -> Option<Pro
   let mut problems_vec: Vec<Vec<Problem>> = Vec::new();
   for i in 1..users.len() {
     let problems_from: Vec<Problem>;
-     match get_problems(&users[i].handle, rating).await {
+     match get_problems_with_given_problemset(rating, problem_set.clone(), user_submissions[i].clone()).await {
       Ok(parsed) => {
         problems_from = parsed;
       },
@@ -76,18 +78,27 @@ pub async fn get_problem_for_users(users: &Vec<User>, rating: u32) -> Option<Pro
 }
 
 async fn handle_duel(ctx: &Context, msg: &Message, users: Vec<User>, rating_range: u32) {
-  let problem_wrap = get_problem_for_users(&users, rating_range).await;
+  let problems_wrap = get_problemset().await;
+  if let Err(_) = problems_wrap {
+    error_response!(ctx, msg, format!("We can't provide a problem"));
+    return;
+  }
+
+  let problems = problems_wrap.unwrap();
+  let user_submissions = get_all_user_submissions(&users).await;
+  let problem_wrap = get_problem_for_users(&users, rating_range, &problems, &user_submissions).await;
   if problem_wrap == None {
     error_response!(ctx, msg, format!("We can't provide a problem"));
     return;
   }
+
   let problem = problem_wrap.unwrap();
   let message = create_problem_message(&problem,
     format!("You guys will compete in 1 hour and 30 minutes to solve this problem.
     \nType `~finish` if you have solved the problem!"), 
     true).unwrap();
   let _ = msg.channel_id.send_message(&ctx.http, message).await;
-  error!("problem: {:?}", problem);
+  
   create_duel(ctx, msg, users, &problem).await;
   let duel = get_duels(&ctx).await.unwrap().last().unwrap().clone();
   single_duel_interactor(&ctx, duel).await;
@@ -211,7 +222,6 @@ macro_rules! user_no_complete {
     };
 
     no_one_wins!(ctx_1, msg_1);
-    error!("remove duel");
     remove_duel(&ctx_1, duel.players).await;
 
   });
@@ -233,7 +243,6 @@ pub async fn duel_interactor(ctx: &Context) {
 
 pub async fn handle_args(ctx: &Context, msg: &Message, mut args: Args, message: String, accept_rating: bool) -> Result<(Vec<UserId>, Option<u32>), String> {
   if let Err(why) = find_user_in_data(&ctx, &msg.author.id.to_string()).await {
-    // error_response!(ctx, msg, why);
     return Err(why);
   }
   let mut rating: Option<u32> = None;
@@ -274,7 +283,6 @@ pub async fn handle_args(ctx: &Context, msg: &Message, mut args: Args, message: 
         }
       }, 
       Err(_) => {
-        // error_response!(ctx, msg, format!("Wrong argument"));
         return Err(format!("Wrong argument"));
       } 
     }
@@ -288,11 +296,8 @@ pub async fn collect_messages(ctx: &Context, msg: &Message, opponents: &Vec<User
     .timeout(wait_duration)
     .stream();
 
-  warn!("opponents: {:?}", opponents);
-
   let mut accepted_users : Vec<UserId> = Vec::new();
 
-  // DISABLE THIS FOR TESTING
   loop {
     if let Some(message) = message_collector.next().await {
       for opponent in opponents.iter() {
@@ -323,7 +328,8 @@ pub async fn confirm_user_in_match(ctx: &Context, msg: &Message, accepted_users:
     let elapsed_time = get_duel(&ctx, sender.duel_id.unwrap()).await.unwrap().begin_time.elapsed().unwrap();
     let (seconds, minutes, hours) = convert_to_hms(&elapsed_time);
     let _ = msg.channel_id.say(&ctx.http, format!("<@{user_id}>", user_id = msg.author.id.to_string())).await;
-    error_response!(ctx, msg, format!("You can't send a duel request to this user because they are in another activity for `{:0>2}h {:0>2}m {:0>2}s`", hours, minutes, seconds));
+    error_response!(ctx, msg, format!("You can't send a duel request because you are in another activity for `{:0>2}h {:0>2}m {:0>2}s`", hours, minutes, seconds));
+    return Vec::new();
   }
   let mut users_in_duel: Vec<User> = Vec::from([ sender ]);
   for user_id in accepted_users.iter() {

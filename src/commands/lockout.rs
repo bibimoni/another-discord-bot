@@ -11,7 +11,7 @@ use serenity::model::prelude::*;
 use serenity::collector::MessageCollector;
 
 use tokio::time::Duration;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::commands::giveme::*;
 use crate::commands::duel::*;
@@ -51,15 +51,20 @@ fn create_ratings_array(number_of_problems: u32, lockout_rating: u32, lockout_in
 }
 
 async fn provide_problems_with_ratings(users: &Vec<User>, ratings_array: &Vec<u32>) -> Option<(Vec<Problem>, Vec<u32>)> {
+  let problems_wrap = get_problemset().await;
+  if let Err(_) = problems_wrap {
+    return None;
+  }
+  let problem_set = problems_wrap.unwrap();
   let number_of_problems = ratings_array.len();  
   let mut problems : Vec<Problem> = Vec::new();
-
+  let user_submissionns = get_all_user_submissions(users).await;
   let mut problems_point: Vec<u32> = vec![0; number_of_problems as usize];
 
   // Find the time of the process 
   let current_time = SystemTime::now();
   for (i, rating) in ratings_array.iter().enumerate() {
-    if let Some(problem) = get_problem_for_users(&users, *rating).await {
+    if let Some(problem) = get_problem_for_users(&users, *rating, &problem_set, &user_submissionns).await {
       problems.push(problem);
     } else {
       return None;
@@ -123,7 +128,6 @@ pub fn is_lockout_complete(lockout: &Duel) -> bool {
   let indices = get_leaderboard_indices(&lockout);
   let passed_time = lockout.begin_time.elapsed().unwrap();
   if passed_time >= lockout.match_duration.unwrap() || indices.len() <= 1 {
-    error!("Lockout only have 1 or less player(s)");
     return true;
   }
   
@@ -139,11 +143,11 @@ pub fn is_lockout_complete(lockout: &Duel) -> bool {
   false
 }
 
-async fn index_who_complete_problem(problem: &Problem, users: Vec<User>) -> Option<usize> {
+async fn index_who_complete_problem(problem: &Problem, users: Vec<User>, user_submissions: &Vec<Vec<Submission>>) -> Option<usize> {
   let mut index: Option<usize> = None;
   let mut current_time: u64 = 0;
-  for (i, user) in users.iter().enumerate() {
-    let parsed = check_complete_problem(user, &problem).await;
+  for i in 0..users.len() {
+    let parsed = check_complete_problem_with_given_submission(&problem, user_submissions[i].clone()).await;
     if let Ok(status) = parsed {
       if index == None {
         index = Some(i);
@@ -160,13 +164,30 @@ async fn index_who_complete_problem(problem: &Problem, users: Vec<User>) -> Opti
   index
 }
 
+// return a vector that for each element is another vector contains all submissions of a user
+pub async fn get_all_user_submissions(users: &Vec<User>) -> Vec<Vec<Submission>> {
+  let mut user_submissions: Vec<Vec<Submission>> = Vec::new();
+  for user in users.clone() {
+    let submission_count = 99999; // We want to get all user submissions
+    let user_submission_wrap = get_user_submission(&user.handle, submission_count).await;
+    if let Err(_) = user_submission_wrap {
+      user_submissions.push(Vec::new());
+      continue;
+    }
+    let submissions = user_submission_wrap.unwrap();
+    user_submissions.push(submissions);
+  }
+  user_submissions
+}
+
 async fn lockout_update(lockout: &mut Duel) {
   let problems_point_cl = lockout.problems_point.clone().unwrap();
+  let user_submissions = get_all_user_submissions(&lockout.players).await;
   for (i, point) in problems_point_cl.iter().enumerate() {
     if *point == 0 {
       continue;
     }
-    if let Some(index) = index_who_complete_problem(&lockout.problems[i], lockout.players.clone()).await {
+    if let Some(index) = index_who_complete_problem(&lockout.problems[i], lockout.players.clone(), &user_submissions).await {
       lockout.add_score(index, *point);
       lockout.set_point(i);
     }
@@ -371,9 +392,7 @@ pub async fn lockout(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
         rating as u32
       }, 
     };
-    // error!("parsed_rating {}", parsed_rating);
-    // msg.channel_id.say(&ctx.http, "Lockout has started").await?;
-    // warn!("n: {}, t: {:?}, rate: {}, inc: {}", number_of_problems, lockout_duration, parsed_rating, lockout_problems_increment);
+
     handle_lockout(
       &ctx, 
       &msg, 

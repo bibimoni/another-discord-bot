@@ -43,14 +43,14 @@ struct ProblemStatistic {
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct Member {
   handle: String,
   name: Option<String>
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct Author {
   contestId: Option<u32>,
   members: Vec<Member>,
@@ -63,7 +63,7 @@ struct Author {
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Submission {
   id: u64,
   contestId: Option<u32>,

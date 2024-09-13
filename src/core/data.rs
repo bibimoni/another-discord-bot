@@ -74,7 +74,6 @@ impl Duel {
     if let Some( ref mut scores ) = self.score_distribution {
       scores.remove(index.unwrap());
     }
-    info!("{:?}", self.players);
   }
 }
 
