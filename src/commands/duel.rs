@@ -10,7 +10,7 @@ use serenity::model::prelude::*;
 use serenity::collector::MessageCollector;
 
 use tokio::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 use crate::commands::handle::*;
 use crate::commands::giveme::*;
@@ -37,7 +37,6 @@ pub async fn get_problem_for_users(users: &Vec<User>, rating: u32) -> Option<Pro
   match problems_wrap {
     Ok(parsed) => problems = parsed,
     Err(_) => { 
-      // error_response!(ctx, msg, why); 
       return None; 
     }
   }
@@ -50,7 +49,6 @@ pub async fn get_problem_for_users(users: &Vec<User>, rating: u32) -> Option<Pro
         problems_from = parsed;
       },
       Err(_) => {
-        // error_response!(ctx, msg, why);
         return None;
       }
      }
@@ -71,7 +69,6 @@ pub async fn get_problem_for_users(users: &Vec<User>, rating: u32) -> Option<Pro
     .collect();
 
   if problems.len() == 0 {
-    // error_response!(ctx, msg, format!("We can't provide a problem for you guys to duel"));
     return None;
   }
   Some(get_problem_with_weights(problems))
@@ -96,7 +93,6 @@ async fn handle_duel(ctx: &Context, msg: &Message, users: Vec<User>, rating_rang
   single_duel_interactor(&ctx, duel).await;
 }
 
-// TODO: ADD an option for a user to cancel a duel
 pub async fn single_duel_interactor(ctx: &Context, duel: Duel) {
   let msg = duel.channel_id;
   macro_rules! user_wins {
@@ -155,14 +151,11 @@ macro_rules! user_no_complete {
       for user in duel.players.iter() {
         if let Ok(good) = check_complete_problem(user, &duel.problems[0]).await {
           if good.0 == false {
-            error!("User hasn't complete the problem");
             continue;
           }
           user_wins!(ctx_1, msg_1, user);
           remove_duel(&ctx_1, duel.players).await;
           return;
-        } else {
-          error!("User hasn't complete the problem");
         }
       }
       no_one_wins!(ctx_1, msg_1);
@@ -255,27 +248,21 @@ pub async fn handle_args(ctx: &Context, msg: &Message, mut args: Args, message: 
               continue;
             }
             if let Ok(_) = find_user_in_data(&ctx, &id.to_string()).await {
-              // error_response!(ctx, msg, format!("Please duel a registered user!"));
-              // return Ok(());
               opponents.push(id);
             }
             // DISABLE THIS FOR TESTING
             if id.to_string() == msg.author.id.to_string() {
-              // error_response!(ctx, msg, format!("Don't start a lockout with yourself"));
               return Err(message);
             }
           },
           None => {
-            info!("is_rate: {}", accept_rating);
             if accept_rating {
               let rate = parsed.parse();
-              info!("rate: {:?}", rate);
               match rate {
                 Ok(rate) => {
                   rating = Some(rate);
                 },
                 Err(_) => {
-                  // error_response!(ctx, msg, format!("Can't fetch user"));
                   return Err(format!("Can't fetch user"));
                 }
               }
@@ -312,7 +299,6 @@ pub async fn collect_messages(ctx: &Context, msg: &Message, opponents: &Vec<User
         if accepted_users.len() == opponents.len() {
           break;
         }
-        // info!("message: {:?} in compare with {:?}", message.content, format!("~accept <@{user_2}>", user_2 = msg.author.id.to_string()));
         if &message.author.id == opponent && message.content == format!("~accept <@{user_2}>", user_2 = msg.author.id.to_string()) {
           accepted_users.push(*opponent);
           if accepted_users.len() == opponents.len() {
@@ -338,7 +324,6 @@ pub async fn confirm_user_in_match(ctx: &Context, msg: &Message, accepted_users:
     let (seconds, minutes, hours) = convert_to_hms(&elapsed_time);
     let _ = msg.channel_id.say(&ctx.http, format!("<@{user_id}>", user_id = msg.author.id.to_string())).await;
     error_response!(ctx, msg, format!("You can't send a duel request to this user because they are in another activity for `{:0>2}h {:0>2}m {:0>2}s`", hours, minutes, seconds));
-    // return Ok(());
   }
   let mut users_in_duel: Vec<User> = Vec::from([ sender ]);
   for user_id in accepted_users.iter() {
@@ -348,7 +333,6 @@ pub async fn confirm_user_in_match(ctx: &Context, msg: &Message, accepted_users:
       let (seconds, minutes, hours) = convert_to_hms(&elapsed_time);
       let _ = msg.channel_id.say(&ctx.http, format!("<@{user_id}>", user_id = user_id.to_string())).await;
       error_response!(ctx, msg, format!("You are in a duel for `{:0>2}h {:0>2}m {:0>2}s`", hours, minutes, seconds));
-      // return Ok(());
     }
     users_in_duel.push(user);
   }
@@ -373,10 +357,6 @@ pub async fn duel(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     if you accept the duel please reponse with ~accept <@{user_2}> within 30 seconds", user = msg.author.id, user_2 = msg.author.id)).await?;
 
   let accepted_users = collect_messages(&ctx, &msg, &opponents, WAIT_DURATION).await;
-
-  // SKIP ACCEPT PROCESS
-  // accepted_users = opponents;
-  error!("Accepted users: {:?}", accepted_users);
   
   if accepted_users.len() != 0 {
     let users_in_duel = confirm_user_in_match(&ctx, &msg, accepted_users).await;
@@ -385,8 +365,6 @@ pub async fn duel(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
       error_response!(ctx, msg, format!("No one can duel with you :("));
       return Ok(());
     }
-
-    error!("error {:?}", rating);
 
     let parsed_rating: u32 = match rating {
       Some(parsed) => {
@@ -411,7 +389,6 @@ pub async fn duel(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         ((sum) / count as u32) / 100 * 100
       }
     };
-    error!("parsed_rating {}", parsed_rating);
     msg.channel_id.say(&ctx.http, "Duel accepted").await?;
 
     handle_duel(&ctx, &msg, users_in_duel, parsed_rating).await;

@@ -1,19 +1,17 @@
-use crate::{create_duel, error_response, find_user_in_data, get_problems, get_user_rating};
+use crate::{error_response, find_user_in_data, get_user_rating};
 
 use std::cmp;
-use std::thread::current;
 use std::time::SystemTime;
 
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult};
-use serenity::builder::{CreateEmbed, CreateMessage};
 use serenity::futures::StreamExt;
 use serenity::prelude::*;
 use serenity::model::prelude::*;
 use serenity::collector::MessageCollector;
 
 use tokio::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::commands::giveme::*;
 use crate::commands::duel::*;
@@ -60,13 +58,10 @@ async fn provide_problems_with_ratings(users: &Vec<User>, ratings_array: &Vec<u3
 
   // Find the time of the process 
   let current_time = SystemTime::now();
-  info!("ratings: {:?}", ratings_array);
   for (i, rating) in ratings_array.iter().enumerate() {
     if let Some(problem) = get_problem_for_users(&users, *rating).await {
       problems.push(problem);
     } else {
-      // error_response!(ctx, msg, format!("We can't provide a problem with the specific rating"));
-      // let _ = edit_to_failed_status(&ctx, message).await;
       return None;
     }
     problems_point[i] = rating - ratings_array[0] + 100;
@@ -102,7 +97,6 @@ async fn handle_lockout(
   let _ = msg.channel_id.say(&ctx.http, format!("Compete for {hours} hour(s) and {minutes} minute(s)\nType `~match update` to update the status of the lockout!\n")).await;
 
   create_lockout(ctx, msg, users, &problems, lockout_duration, problems_point).await;
-  info!("hours: {}, minutes: {}", hours, minutes);
 
   let lockout_match = get_duels(&ctx).await.unwrap().last().unwrap().clone();
   let _ = edit_to_lockout_status(&ctx, &lockout_match, message, true).await;
@@ -127,10 +121,12 @@ pub fn get_leaderboard_indices(lockout: &Duel) -> Vec<usize> {
 
 pub fn is_lockout_complete(lockout: &Duel) -> bool {
   let indices = get_leaderboard_indices(&lockout);
-  if indices.len() <= 1 {
+  let passed_time = lockout.begin_time.elapsed().unwrap();
+  if passed_time >= lockout.match_duration.unwrap() || indices.len() <= 1 {
     error!("Lockout only have 1 or less player(s)");
     return true;
   }
+  
   let score = lockout.score_distribution.clone().unwrap();
   let score_to_beat = score[indices[0]];
   let mut current = score[indices[1]];
@@ -177,7 +173,6 @@ async fn lockout_update(lockout: &mut Duel) {
   }
 }
 
-// TODO: add a waiting message when fetching the scoreboard 
 pub async fn single_lockout_interactor(ctx: &Context, mut lockout: Duel) {
   let msg = lockout.channel_id.clone();
 
@@ -187,13 +182,17 @@ pub async fn single_lockout_interactor(ctx: &Context, mut lockout: Duel) {
         let _ = $msg.channel_id.send_message(&$ctx, message).await;
       };
   }
-
+  macro_rules! edit_standings {
+    ($ctx: expr, $msg: expr, $lockout: expr, $opt: expr) => {
+      edit_to_lockout_status(&$ctx, &$lockout, $msg, $opt).await;
+    };
+  }
   let passed_time = lockout.begin_time.elapsed().unwrap();
   let ctx_1 = ctx.clone();
   let msg_1 = msg.clone();
   tokio::spawn(async move {
     if passed_time >= lockout.match_duration.unwrap() {
-      standings!(ctx_1, msg_1, lockout, false);
+      standings!(ctx_1, msg_1, lockout, true);
       remove_lockout(&ctx_1, lockout.players).await;
       return;
     }
@@ -215,7 +214,6 @@ pub async fn single_lockout_interactor(ctx: &Context, mut lockout: Duel) {
         }
 
         let user = user_wrap.unwrap();
-        info!("user: {:?}, message: {:?}", user, message.content);
         let mut have_user = false;
         for player in lockout.players.iter() {
           if player.userId == user.userId {
@@ -229,13 +227,15 @@ pub async fn single_lockout_interactor(ctx: &Context, mut lockout: Duel) {
           lockout.remove_user(msg.author.id.to_string());
         }
         if message.content == format!("~match update") || message.content == format!("~match giveup") {
+          let builder = create_await_message();
+          let message = msg.channel_id.send_message(&ctx_1.http, builder).await.unwrap();
           lockout_update(&mut lockout).await;
           if is_lockout_complete(&lockout) {
-            standings!(ctx_1, msg_1, lockout, true);
+            edit_standings!(ctx_1, message, lockout, true);
             remove_lockout(&ctx_1, lockout.players).await;
             return;
           } else {
-            standings!(ctx_1, msg_1, lockout, true);
+            edit_standings!(ctx_1, message, lockout, true);
           }
         } 
       } else {
@@ -257,7 +257,6 @@ pub async fn lockout_interactor(ctx: &Context) {
 
   let lockouts = duels_wrap.unwrap();
   for lockout in lockouts.into_iter() {
-    // info!("duel_id: {}", duel.clone().duel_id);
     if lockout.clone().duel_type == DuelType::LOCKOUT {
       single_lockout_interactor(&ctx, lockout).await;
     }
@@ -296,9 +295,7 @@ pub async fn lockout(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
     error_response!(ctx, msg, format!("Please start a lockout with some registered users"));
     return Ok(());
   }
-  info!("option: {:?}", option);
   if option != None && option.unwrap() == 1 {
-    info!("got here");
     let _ = msg.channel_id.say(&ctx.http, "Please enter  for the lockout\n
     <number of problems> <duration (in minutes)> <average rating> <increment>").await?;
 

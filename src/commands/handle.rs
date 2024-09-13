@@ -1,7 +1,7 @@
 use serenity::all::{CreateEmbed, CreateMessage};
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult};
-use serenity::model::{error, prelude::*};
+use serenity::model::prelude::*;
 use serenity::prelude::*;
 use serenity::model::Colour;
 
@@ -12,7 +12,7 @@ use reqwest::Client;
 use tokio::io;
 use tokio::time::{sleep, Duration};
 
-use tracing::{error, info, warn};
+use tracing::error;
 use serde::{Deserialize, Serialize};
 
 use crate::{add_user_to_data, get_problemset, UserData};

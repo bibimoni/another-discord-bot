@@ -30,7 +30,7 @@ use crate::core::data::*;
 
 use serenity::framework::standard::macros::{ group, hook };
 use serenity::model::channel::Message;
-use tracing::{debug, error, info, instrument};
+use tracing::{error, info, instrument};
 
 struct Handler;
 

@@ -9,8 +9,6 @@ use std::cmp;
 
 use tokio::time::Duration;
 
-use tracing::{error, info, warn};
-
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
 
@@ -94,8 +92,8 @@ async fn handle_uncomplete_challenge(user: &User) -> Result<(), String> {
   return Err(format!("You still have an active challenge!"));
 }
 
-// TODO: return a vector of unsolved problems for some user within the `rating_range` (first half of the current `recommend problem`) in sorted order
-
+// return a vector of unsolved problems for some user within the `rating_range` 
+// (first half of the current `recommend problem`) in sorted order
 pub async fn get_problems(user: &String, mut rating_range: u32) -> Result<Vec<Problem>, String> {
   let problems_wrap = get_problemset().await;
   if let Err(why) = problems_wrap {
