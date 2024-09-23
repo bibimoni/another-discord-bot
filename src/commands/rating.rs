@@ -44,6 +44,9 @@ pub async fn get_user_rating(user: &String) -> Result<u32, String> {
       reqwest::StatusCode::OK => {
         match result.json::<APIRespone>().await {
           Ok(parsed) => { 
+            if parsed.result.len() == 0 {
+              return Ok(0 as u32);
+            }
             let rating_from_last_contest = get_rating(&parsed.result[parsed.result.len() - 1]);
             return Ok(rating_from_last_contest);
           },  
@@ -64,8 +67,12 @@ pub async fn rating(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
   let user = args.parse::<String>()?;
   match get_user_rating(&user).await {
     Ok(rating) => {
-      let message = create_rating_message(rating, &user, &msg);
-      msg.channel_id.send_message(&ctx.http, message).await?;
+      if rating == 0 {
+        error_response!(ctx, msg, format!("User didn't participate in any contests"));
+      } else {
+        let message = create_rating_message(rating, &user, &msg);
+        msg.channel_id.send_message(&ctx.http, message).await?;
+      }
     },
     Err(why) => {
       error_response!(ctx, msg, why);

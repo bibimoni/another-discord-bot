@@ -201,7 +201,10 @@ async fn giveme(ctx: &Context, msg: &Message, mut args : Args) -> CommandResult 
   let user = user_wrap.unwrap();
   if give_type == "c" || give_type == "challenge" {
     if let Err(why) = handle_uncomplete_challenge(&user).await {
-      error_response!(ctx, msg, why);
+      // error_response!(ctx, msg, why);
+      let problem = user.active_challenge.clone().unwrap();
+      let message = create_problem_message(&problem, why, true).unwrap();
+      msg.channel_id.send_message(&ctx.http, message).await?;
       return Ok(());
     }
   }
