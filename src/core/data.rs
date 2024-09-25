@@ -12,12 +12,13 @@ use tokio::time::Duration;
 
 use crate::commands::handle::*;
 
+use reqwest;
+
 use std::sync::Arc;
 
 use tracing::{info, error, warn};
 
 use serde::{Deserialize, Serialize};
-
 
 #[allow(non_snake_case)]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -96,6 +97,34 @@ pub struct UserData;
 
 impl TypeMapKey for UserData {
   type Value = Arc<RwLock<Data>>;
+}
+
+#[allow(non_snake_case)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct Contest {
+  pub id: u32,
+  pub name: String,
+  r#type: String,
+  phase: String,
+  frozen: bool,
+  durationSeconds: u64,
+  startTimeSeconds: Option<u64>,
+  relativeTimeSeconds: Option<i64>,
+  preparedBy: Option<String>,
+  websiteUrl: Option<String>,
+  description: Option<String>,
+  difficulty: Option<usize>,
+  kind: Option<String>,
+  icpcRegion: Option<String>,
+  country: Option<String>,
+  city: Option<String>,
+  season: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct APIContestResponse {
+  status: String, 
+  result: Vec<Contest>
 }
 
 pub struct ShardManagerContainer;
@@ -280,7 +309,7 @@ pub async fn edit_duel(
         begin_time: current, 
         problems: problems.unwrap(),
         channel_id : msg.unwrap().clone(),
-        duel_type: (if number_of_problems == 1 { DuelType::DUEL } else { DuelType::LOCKOUT }),
+        duel_type: if number_of_problems == 1 { DuelType::DUEL } else { DuelType::LOCKOUT },
         score_distribution: if number_of_problems == 1 { None } else { Some(vec![0; number_of_problems]) },
         match_duration: duration,
         problems_point: problems_score
@@ -349,6 +378,46 @@ pub async fn add_points_to_user(ctx: &Context, user_id: &String, points: u64) {
   let _ = update_json(ctx).await;
 }
 
+async fn handle_api_contest_response(response : reqwest::Response) -> Result<APIContestResponse, String> {
+  if response.status() == reqwest::StatusCode::OK {
+    match response.json::<APIContestResponse>().await {
+      Ok(parsed) => {
+        return Ok(parsed);
+      },
+      Err(_) => {
+        return Err(format!("Failed to match json"));
+      }
+    };
+  } else {
+    error!("Codeforces API Error");
+    return Err(format!("Codeforces API Error"));    
+  }
+}
+
+pub async fn get_contests() -> Result<Vec<Contest>, String> {
+  let client = reqwest::Client::new();
+  let url = format!("https://codeforces.com/api/contest.list?gym=false");
+  let http_result = client.get(url).send().await;
+  match http_result {
+    Ok(res) => {
+      match handle_api_contest_response(res).await {
+        Ok(json_object) => {
+          let contests = json_object.result;
+          if contests.len() == 0 {
+            return Err(format!("Can't fetch contests"));
+          }
+          return Ok(contests);
+        }, 
+        Err(why) => {
+          return Err(why);
+        }
+      }
+    }, 
+    Err(_) => {
+      return Err(format!("Codeforces API Error"));
+    }
+  }
+} 
 
 // add json data to the global UserData struct from user.json
 pub async fn initialize_data(client : &Client) -> io::Result<()> {

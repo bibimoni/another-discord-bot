@@ -187,7 +187,7 @@ pub async fn edit_to_lockout_status(ctx: &Context, lockout: &Duel, mut message: 
 }
 
 // create a red colored embed and mention user (i will remove create_error_message later)
-pub fn create_error_response(text: String, msg: &Message) -> CreateMessage {
+pub fn create_error_response(text: String, _: &Message) -> CreateMessage {
   let embed = CreateEmbed::new()
     .colour(Colour::RED)
     .description(text)

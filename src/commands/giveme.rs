@@ -15,9 +15,13 @@ use rand::prelude::*;
 use reqwest::Client;
 
 use crate::commands::rating::*;
-use crate::core::data::{self, *, User};
-use crate::utils::message_creator::*;
 use crate::commands::handle::*;
+use crate::commands::lockout::*;
+
+use crate::core::data::{self, *, User};
+
+use crate::utils::message_creator::*;
+
 use crate::error_response;
 
 const CHALLANGE_DURATION : Duration = Duration::from_millis(1000 * 60 * 30);
@@ -125,7 +129,13 @@ pub async fn get_problems(user: &String, rating_range: u32) -> Result<Vec<Proble
   if let Err(why) = problems_wrap {
     return Err(why);
   }
-  let problems = problems_wrap.unwrap();
+  let contests_wrap = get_contests().await;
+  if let Err(why) = contests_wrap {
+    return Err(why);
+  }
+  let mut problems = problems_wrap.unwrap();
+  problems = filter_problemset(problems, contests_wrap.unwrap());
+
   let submission_count = 99999; // We want to get all user submissions
   let user_submission_wrap = get_user_submission(&user, submission_count).await;
   if let Err(why) = user_submission_wrap {

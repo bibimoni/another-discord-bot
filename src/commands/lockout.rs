@@ -50,12 +50,29 @@ fn create_ratings_array(number_of_problems: u32, lockout_rating: u32, lockout_in
   score_array
 }
 
+// filter problem from problemset to make sure they only belong to codeforces round
+pub fn filter_problemset(problem_set: Vec<Problem>, mut contests: Vec<Contest>) -> Vec<Problem> {
+  let match_str = "Codeforces Round";
+  contests = contests.into_iter().filter(| contest | {
+    contest.name.contains(match_str) 
+  }).collect::<Vec<_>>();
+  problem_set.into_iter().filter(| problem | {
+    contests.iter().any(| contest | contest.id == problem.contestId.unwrap() )
+  }).collect::<Vec<_>>()
+}
+
 async fn provide_problems_with_ratings(users: &Vec<User>, ratings_array: &Vec<u32>) -> Option<(Vec<Problem>, Vec<u32>)> {
   let problems_wrap = get_problemset().await;
   if let Err(_) = problems_wrap {
     return None;
   }
-  let problem_set = problems_wrap.unwrap();
+  let contests_wrap = get_contests().await;
+  if let Err(_) = contests_wrap {
+    return None;
+  }
+  
+  let mut problem_set = problems_wrap.unwrap();
+  problem_set = filter_problemset(problem_set, contests_wrap.unwrap());
   let number_of_problems = ratings_array.len();  
   let mut problems : Vec<Problem> = Vec::new();
   let user_submissionns = get_all_user_submissions(users).await;
@@ -264,7 +281,7 @@ pub async fn single_lockout_interactor(ctx: &Context, mut lockout: Duel) {
         break;
       }
     };
-    standings!(ctx_1, msg_1, lockout, false);
+    standings!(ctx_1, msg_1, lockout, true);
     remove_lockout(&ctx_1, lockout.players).await;
     return;
 

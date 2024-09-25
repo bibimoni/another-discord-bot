@@ -83,8 +83,14 @@ async fn handle_duel(ctx: &Context, msg: &Message, users: Vec<User>, rating_rang
     error_response!(ctx, msg, format!("We can't provide a problem"));
     return;
   }
+  let contests_wrap = get_contests().await;
+  if let Err(_) = contests_wrap {
+    error_response!(ctx, msg, format!("Can't fetch contests data"));
+    return;
+  }
 
-  let problems = problems_wrap.unwrap();
+  let mut problems = problems_wrap.unwrap();
+  problems = filter_problemset(problems, contests_wrap.unwrap());
   let user_submissions = get_all_user_submissions(&users).await;
   let problem_wrap = get_problem_for_users(&users, rating_range, &problems, &user_submissions).await;
   if problem_wrap == None {
