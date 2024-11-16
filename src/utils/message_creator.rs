@@ -24,7 +24,7 @@ pub fn create_rating_message(rating : u32, handle : &String, msg: &Message) -> C
   let embed = CreateEmbed::new()
     .colour(Colour::BLUE)
     .title(format!("Rating of {user}", user = handle))
-    .field("Rating", if rating == 0 as u32 {rating.to_string()} else {format!("User didn't participate in any contest")}, false)
+    .field("Rating", if rating != 0 as u32 {rating.to_string()} else {format!("User didn't participate in any contest")}, false)
     .timestamp(Timestamp::now());
   let builder = CreateMessage::new()
     .content(format!("<@{id}>", id = msg.author.id))

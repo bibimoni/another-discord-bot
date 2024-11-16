@@ -67,7 +67,7 @@ pub async fn rating(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
   let user = args.parse::<String>()?;
   match get_user_rating(&user).await {
     Ok(rating) => {
-      if rating == 0 {
+      if rating == (0 as u32) {
         error_response!(ctx, msg, format!("User didn't participate in any contests"));
       } else {
         let message = create_rating_message(rating, &user, &msg);
