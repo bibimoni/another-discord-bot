@@ -22,6 +22,18 @@ const DUEL_DURATION : Duration = Duration::from_millis(1000 * 60 * 90);
 const WAIT_DURATION : Duration = Duration::from_millis(1000 * 30);
 pub const DEFAULT_RATING : i32 = 1000;
 
+async fn show_help() -> CreateMessage {
+  let embed = CreateEmbed::new()
+    .title(format!("Usage of `duel`"))
+    .description(format!("`~duel <@user> [rating (optional)] (you can try to invite more than 1 user but i won't guarantee it will work)`\n
+      `~match finish (to confirm that you have solved the problem and try to end the match)`\n
+      `~match giveup (give up like a loser)`"))
+    .color(Colour::DARK_GREEN);
+  let builder = CreateMessage::new()
+    .embed(embed);
+  builder
+}
+
 pub fn extract_user_id(mention: String) -> Option<UserId> {
   if let Some(id) = mention.trim().strip_prefix("<@")?.strip_suffix('>')?.parse::<u64>().ok() {
     Some(UserId::new(id))
@@ -247,11 +259,11 @@ pub async fn duel_interactor(ctx: &Context) {
   };
 }
 
-pub async fn handle_args(ctx: &Context, msg: &Message, mut args: Args, message: String, accept_rating: bool) -> Result<(Vec<UserId>, Option<u32>), String> {
+pub async fn handle_args(ctx: &Context, msg: &Message, mut args: Args, message: String, accept_option: bool) -> Result<(Vec<UserId>, Option<u32>), String> {
   if let Err(why) = find_user_in_data(&ctx, &msg.author.id.to_string()).await {
     return Err(why);
   }
-  let mut rating: Option<u32> = None;
+  let mut opt: Option<u32> = None;
   let mut opponents: Vec<UserId> = Vec::new();
   for arg in args.iter::<String>() {
     match arg {
@@ -271,17 +283,17 @@ pub async fn handle_args(ctx: &Context, msg: &Message, mut args: Args, message: 
             }
           },
           None => {
-            if accept_rating {
-              let rate = parsed.parse();
-              match rate {
-                Ok(rate) => {
-                  rating = Some(rate);
+            if accept_option {
+              let option = parsed.parse();
+              match option {
+                Ok(parsed_option) => {
+                  opt = Some(parsed_option);
                 },
                 Err(_) => {
                   return Err(format!("Can't fetch user"));
                 }
               }
-              return Ok((opponents, rating));
+              return Ok((opponents, opt));
             } else {
               return Err(format!("Can't fetch user"));
             }
@@ -293,7 +305,7 @@ pub async fn handle_args(ctx: &Context, msg: &Message, mut args: Args, message: 
       } 
     }
   }
-  Ok((opponents, rating))
+  Ok((opponents, opt))
 }
 
 pub async fn collect_messages(ctx: &Context, msg: &Message, opponents: &Vec<UserId>, wait_duration: Duration) -> Vec<UserId> {
@@ -353,6 +365,21 @@ pub async fn confirm_user_in_match(ctx: &Context, msg: &Message, accepted_users:
 
 #[command]
 pub async fn duel(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+  let arg_clone = args.clone().single::<String>();
+  let mut is_help = false;
+  match arg_clone {
+    Ok(return_arg) => {
+      if return_arg == "h" || return_arg == "help" {
+        is_help = true;
+      }
+    },
+    Err(_) => { }
+  };
+  if is_help {
+    let message = show_help().await;
+    msg.channel_id.send_message(&ctx.http, message).await?;
+    return Ok(());
+  }
   let args_result = handle_args(&ctx, &msg, args, format!("Please don't duel yourself!"), true).await;
   if let Err(why) = args_result {
     error_response!(ctx, msg, why);

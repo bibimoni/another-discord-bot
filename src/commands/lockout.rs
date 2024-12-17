@@ -9,6 +9,7 @@ use serenity::futures::StreamExt;
 use serenity::prelude::*;
 use serenity::model::prelude::*;
 use serenity::collector::MessageCollector;
+use serenity::builder::{CreateEmbed, CreateMessage};
 
 use tokio::time::Duration;
 use tracing::info;
@@ -26,6 +27,19 @@ const WAIT_DURATION : Duration = Duration::from_millis(1000 * 30);
 const DEFAULT_PROBLEM_COUNT : i32 = 5;
 const DEFAULT_INCREMENT : i32 = 100;
 const DEFAULT_DURATION : Duration = Duration::from_secs(60 * 90);
+
+
+async fn show_help() -> CreateMessage {
+  let embed = CreateEmbed::new()
+    .title(format!("Usage of `lockoout`"))
+    .description(format!("`~lockout <@user1> <@user2> ... <@usern> (type `1` or leave empty)`\n
+      `~match update (get match's current status)`\n
+      `~match giveup (give up like a loser)`"))
+    .color(Colour::DARK_GREEN);
+  let builder = CreateMessage::new()
+    .embed(embed);
+  builder
+}
 
 /*
   Using the rating as the middle rating range, and decrease to the left and increase to the
@@ -322,7 +336,21 @@ pub async fn lockout(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
   let mut lockout_duration: Duration = DEFAULT_DURATION;
   let mut lockout_rating: i32 = -1 as i32;
   let mut lockout_problems_increment: i32 = DEFAULT_INCREMENT;
-
+  let arg_clone = args.clone().single::<String>();
+  let mut is_help = false;
+  match arg_clone {
+    Ok(return_arg) => {
+      if return_arg == "h" || return_arg == "help" {
+        is_help = true;
+      }
+    },
+    Err(_) => { }
+  };
+  if is_help {
+    let message = show_help().await;
+    msg.channel_id.send_message(&ctx.http, message).await?;
+    return Ok(());
+  }
   let args_result = handle_args(&ctx, &msg, args, format!("Don't start a lockout with yourself"), true).await;
   if let Err(why) = args_result {
     error_response!(ctx, msg, why);
@@ -335,8 +363,9 @@ pub async fn lockout(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
     return Ok(());
   }
   if option != None && option.unwrap() == 1 {
-    let _ = msg.channel_id.say(&ctx.http, "Please enter  for the lockout\n
-    <number of problems> <duration (in minutes)> <average rating> <increment>").await?;
+    let _ = msg.channel_id.say(&ctx.http, "Configure the lockout using:\n
+    <number of problems> <duration (in minutes)> <average rating> <increment>\n
+    If you want an argument to take the default value, use `-1`").await?;
 
     let mut collector = MessageCollector::new(&ctx.shard)
     .channel_id(msg.channel_id)
