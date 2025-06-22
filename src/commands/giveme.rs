@@ -82,7 +82,7 @@ fn weight(x: usize, n: usize, alpha: f64) -> f64 {
 async fn show_help() -> CreateMessage {
   let embed = CreateEmbed::new()
     .title(format!("Usage of `giveme`"))
-    .description(format!("`~giveme practice [rating / ranting_range]`\n`;giveme challenge [delta / delta_range]`\n`;giveme help`"))
+    .description(format!("`~giveme practice [rating / ranting_range]`\n`~giveme challenge [delta / delta_range]`\n`~giveme help`\n`~giveme icpc [number of problem]` (this will recommend icpc problems using normal distribution probability)"))
     .color(Colour::DARK_GREEN);
   let builder = CreateMessage::new().embed(embed);
   builder
