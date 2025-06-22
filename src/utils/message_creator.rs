@@ -143,6 +143,17 @@ fn get_problems_string(lockout: &Duel) -> String {
   problems
 }
 
+fn get_index_string(vec_problems: &Vec<Problem>) -> String {
+  let mut ratings: String = String::new();
+  let problems = vec_problems.clone();
+
+  for problem in problems.iter() {
+    ratings += problem.index.as_str();
+    ratings += "\n";
+  }
+  ratings
+}
+
 fn get_gym_problems_string(vec_problems: &Vec<Problem>) -> String {
   let mut problems: String = String::new();
   let problems_arr = vec_problems.clone();
@@ -176,8 +187,10 @@ fn get_time_left_string(lockout: &Duel) -> String {
 
 pub fn create_problems_embed(vec_problem: &Vec<Problem>) -> CreateEmbed {
   let problems: String = get_gym_problems_string(&vec_problem);
+  let index: String = get_index_string(&vec_problem);
   let embed = CreateEmbed::new()
     .title("ICPC training promblems")
+    .field("Index", index, true)
     .field("Problems", problems, true)
     .colour(Colour::ROSEWATER);
   embed
@@ -286,4 +299,3 @@ pub fn create_problem_message(
 
   Some(builder)
 }
-
