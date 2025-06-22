@@ -3,49 +3,53 @@ use crate::{error_response, find_user_in_data, get_user_rating};
 use std::cmp;
 use std::time::SystemTime;
 
+use serenity::builder::{CreateEmbed, CreateMessage};
+use serenity::collector::MessageCollector;
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult};
 use serenity::futures::StreamExt;
-use serenity::prelude::*;
 use serenity::model::prelude::*;
-use serenity::collector::MessageCollector;
-use serenity::builder::{CreateEmbed, CreateMessage};
+use serenity::prelude::*;
 
 use tokio::time::Duration;
 use tracing::info;
 
-use crate::commands::giveme::*;
 use crate::commands::duel::*;
+use crate::commands::giveme::*;
 use crate::commands::handle::*;
 
-use crate::core::data::*;
 use crate::core::data::User;
+use crate::core::data::*;
 
 use crate::utils::message_creator::*;
 
-const WAIT_DURATION : Duration = Duration::from_millis(1000 * 30);
-const DEFAULT_PROBLEM_COUNT : i32 = 5;
-const DEFAULT_INCREMENT : i32 = 100;
-const DEFAULT_DURATION : Duration = Duration::from_secs(60 * 90);
-
+const WAIT_DURATION: Duration = Duration::from_millis(1000 * 30);
+const DEFAULT_PROBLEM_COUNT: i32 = 5;
+const DEFAULT_INCREMENT: i32 = 100;
+const DEFAULT_DURATION: Duration = Duration::from_secs(60 * 90);
 
 async fn show_help() -> CreateMessage {
   let embed = CreateEmbed::new()
     .title(format!("Usage of `lockoout`"))
-    .description(format!("`~lockout <@user1> <@user2> ... <@usern> (type `1` or leave empty)`\n
+    .description(format!(
+      "`~lockout <@user1> <@user2> ... <@usern> (type `1` or leave empty)`\n
       `~match update (get match's current status)`\n
-      `~match giveup (give up like a loser)`"))
+      `~match giveup (give up like a loser)`"
+    ))
     .color(Colour::DARK_GREEN);
-  let builder = CreateMessage::new()
-    .embed(embed);
+  let builder = CreateMessage::new().embed(embed);
   builder
 }
 
 /*
-  Using the rating as the middle rating range, and decrease to the left and increase to the
-   right half of the number of problems by the ammount of the increment
- */
-fn create_ratings_array(number_of_problems: u32, lockout_rating: u32, lockout_increment: u32) -> Vec<u32> {
+ Using the rating as the middle rating range, and decrease to the left and increase to the
+  right half of the number of problems by the ammount of the increment
+*/
+fn create_ratings_array(
+  number_of_problems: u32,
+  lockout_rating: u32,
+  lockout_increment: u32,
+) -> Vec<u32> {
   let mut score_array: Vec<u32> = vec![0; number_of_problems as usize];
   let mid = number_of_problems as usize / 2;
   score_array[mid] = lockout_rating;
@@ -67,35 +71,46 @@ fn create_ratings_array(number_of_problems: u32, lockout_rating: u32, lockout_in
 // filter problem from problemset to make sure they only belong to codeforces round
 pub fn filter_problemset(problem_set: Vec<Problem>, mut contests: Vec<Contest>) -> Vec<Problem> {
   let match_str = "Codeforces Round";
-  contests = contests.into_iter().filter(| contest | {
-    contest.name.contains(match_str) 
-  }).collect::<Vec<_>>();
-  problem_set.into_iter().filter(| problem | {
-    contests.iter().any(| contest | contest.id == problem.contestId.unwrap() )
-  }).collect::<Vec<_>>()
+  contests = contests
+    .into_iter()
+    .filter(|contest| contest.name.contains(match_str))
+    .collect::<Vec<_>>();
+  problem_set
+    .into_iter()
+    .filter(|problem| {
+      contests
+        .iter()
+        .any(|contest| contest.id == problem.contestId.unwrap())
+    })
+    .collect::<Vec<_>>()
 }
 
-async fn provide_problems_with_ratings(users: &Vec<User>, ratings_array: &Vec<u32>) -> Option<(Vec<Problem>, Vec<u32>)> {
+async fn provide_problems_with_ratings(
+  users: &Vec<User>,
+  ratings_array: &Vec<u32>,
+) -> Option<(Vec<Problem>, Vec<u32>)> {
   let problems_wrap = get_problemset().await;
   if let Err(_) = problems_wrap {
     return None;
   }
-  let contests_wrap = get_contests().await;
+  let contests_wrap = get_contests(false).await;
   if let Err(_) = contests_wrap {
     return None;
   }
-  
+
   let mut problem_set = problems_wrap.unwrap();
   problem_set = filter_problemset(problem_set, contests_wrap.unwrap());
-  let number_of_problems = ratings_array.len();  
-  let mut problems : Vec<Problem> = Vec::new();
+  let number_of_problems = ratings_array.len();
+  let mut problems: Vec<Problem> = Vec::new();
   let user_submissionns = get_all_user_submissions(users).await;
   let mut problems_point: Vec<u32> = vec![0; number_of_problems as usize];
 
-  // Find the time of the process 
+  // Find the time of the process
   let current_time = SystemTime::now();
   for (i, rating) in ratings_array.iter().enumerate() {
-    if let Some(problem) = get_problem_for_users(&users, *rating, &problem_set, &user_submissionns).await {
+    if let Some(problem) =
+      get_problem_for_users(&users, *rating, &problem_set, &user_submissionns).await
+    {
       problems.push(problem);
     } else {
       return None;
@@ -108,17 +123,21 @@ async fn provide_problems_with_ratings(users: &Vec<User>, ratings_array: &Vec<u3
 }
 
 async fn handle_lockout(
-  ctx: &Context, 
-  msg: &Message, 
-  users: Vec<User>, 
-  number_of_problems: u32, 
-  lockout_duration: Duration, 
-  lockout_rating: u32, 
-  lockout_increment: u32
+  ctx: &Context,
+  msg: &Message,
+  users: Vec<User>,
+  number_of_problems: u32,
+  lockout_duration: Duration,
+  lockout_rating: u32,
+  lockout_increment: u32,
 ) {
   let builder = create_await_message();
-  let message = msg.channel_id.send_message(&ctx.http, builder).await.unwrap();
-  
+  let message = msg
+    .channel_id
+    .send_message(&ctx.http, builder)
+    .await
+    .unwrap();
+
   let ratings_array = create_ratings_array(number_of_problems, lockout_rating, lockout_increment);
 
   let parsed = provide_problems_with_ratings(&users, &ratings_array).await;
@@ -127,9 +146,9 @@ async fn handle_lockout(
     return;
   }
   let (problems, problems_point) = parsed.unwrap();
-  
+
   let (_, minutes, hours) = convert_to_hms(&lockout_duration);
-  
+
   let _ = msg.channel_id.say(&ctx.http, format!("Compete for {hours} hour(s) and {minutes} minute(s)\nType `~match update` to update the status of the lockout!\n")).await;
 
   create_lockout(ctx, msg, users, &problems, lockout_duration, problems_point).await;
@@ -140,18 +159,16 @@ async fn handle_lockout(
 }
 
 /*
-  return a set of index where the first index of the set is the 
+  return a set of index where the first index of the set is the
   position of the first player in lockout.payer, the secnod index
   is the position of the second player and ...
 */
 pub fn get_leaderboard_indices(lockout: &Duel) -> Vec<usize> {
   let n = lockout.players.len();
-  let mut indices : Vec<usize> = (0..n).collect();
+  let mut indices: Vec<usize> = (0..n).collect();
 
   let score = lockout.score_distribution.clone().unwrap();
-  indices.sort_by(|i, j| 
-    score[*j].partial_cmp(&score[*i]).unwrap()
-  );
+  indices.sort_by(|i, j| score[*j].partial_cmp(&score[*i]).unwrap());
   indices
 }
 
@@ -161,7 +178,7 @@ pub fn is_lockout_complete(lockout: &Duel) -> bool {
   if passed_time >= lockout.match_duration.unwrap() || indices.len() <= 1 {
     return true;
   }
-  
+
   let score = lockout.score_distribution.clone().unwrap();
   let score_to_beat = score[indices[0]];
   let mut current = score[indices[1]];
@@ -174,11 +191,16 @@ pub fn is_lockout_complete(lockout: &Duel) -> bool {
   false
 }
 
-async fn index_who_complete_problem(problem: &Problem, users: Vec<User>, user_submissions: &Vec<Vec<Submission>>) -> Option<usize> {
+async fn index_who_complete_problem(
+  problem: &Problem,
+  users: Vec<User>,
+  user_submissions: &Vec<Vec<Submission>>,
+) -> Option<usize> {
   let mut index: Option<usize> = None;
   let mut current_time: u64 = 0;
   for i in 0..users.len() {
-    let parsed = check_complete_problem_with_given_submission(&problem, user_submissions[i].clone()).await;
+    let parsed =
+      check_complete_problem_with_given_submission(&problem, user_submissions[i].clone()).await;
     if let Ok(status) = parsed {
       if index == None {
         index = Some(i);
@@ -218,7 +240,13 @@ async fn lockout_update(lockout: &mut Duel) {
     if *point == 0 {
       continue;
     }
-    if let Some(index) = index_who_complete_problem(&lockout.problems[i], lockout.players.clone(), &user_submissions).await {
+    if let Some(index) = index_who_complete_problem(
+      &lockout.problems[i],
+      lockout.players.clone(),
+      &user_submissions,
+    )
+    .await
+    {
       lockout.add_score(index, *point);
       lockout.set_point(i);
     }
@@ -229,17 +257,17 @@ pub async fn single_lockout_interactor(ctx: &Context, mut lockout: Duel) {
   let msg = lockout.channel_id.clone();
 
   macro_rules! standings {
-      ($ctx: expr, $msg: expr, $lockout: expr, $opt: expr) => {
-        let message = create_lockout_status(&$lockout, $opt);   
-        let _ = $msg.channel_id.send_message(&$ctx, message).await;
-      };
+    ($ctx: expr, $msg: expr, $lockout: expr, $opt: expr) => {
+      let message = create_lockout_status(&$lockout, $opt);
+      let _ = $msg.channel_id.send_message(&$ctx, message).await;
+    };
   }
   macro_rules! edit_standings {
     ($ctx: expr, $msg: expr, $lockout: expr, $opt: expr) => {
       edit_to_lockout_status(&$ctx, &$lockout, $msg, $opt).await;
     };
   }
-  
+
   let passed_time = lockout.begin_time.elapsed().unwrap();
   let ctx_1 = ctx.clone();
   let msg_1 = msg.clone();
@@ -249,18 +277,20 @@ pub async fn single_lockout_interactor(ctx: &Context, mut lockout: Duel) {
       remove_lockout(&ctx_1, lockout.players).await;
       return;
     }
-    
+
     let mut message_collector = MessageCollector::new(&ctx_1.shard)
       .timeout(lockout.match_duration.unwrap() - passed_time)
       .stream();
 
     loop {
       if let Some(message) = message_collector.next().await {
-        if message.content != format!("~match update") && message.content != format!("~match giveup") {
+        if message.content != format!("~match update")
+          && message.content != format!("~match giveup")
+        {
           continue;
         }
         let user_wrap = find_user_in_data(&ctx_1, &message.author.id.to_string()).await;
-        
+
         if let Err(why) = user_wrap {
           error_response!(ctx_1, msg_1, why);
           continue;
@@ -275,13 +305,19 @@ pub async fn single_lockout_interactor(ctx: &Context, mut lockout: Duel) {
         }
         if !have_user {
           continue;
-        } 
+        }
         if message.content == format!("~match giveup") {
           lockout.remove_user(msg.author.id.to_string());
         }
-        if message.content == format!("~match update") || message.content == format!("~match giveup") {
+        if message.content == format!("~match update")
+          || message.content == format!("~match giveup")
+        {
           let builder = create_await_message();
-          let message = msg.channel_id.send_message(&ctx_1.http, builder).await.unwrap();
+          let message = msg
+            .channel_id
+            .send_message(&ctx_1.http, builder)
+            .await
+            .unwrap();
           lockout_update(&mut lockout).await;
           if is_lockout_complete(&lockout) {
             edit_standings!(ctx_1, message, lockout, true);
@@ -290,15 +326,14 @@ pub async fn single_lockout_interactor(ctx: &Context, mut lockout: Duel) {
           } else {
             edit_standings!(ctx_1, message, lockout, true);
           }
-        } 
+        }
       } else {
         break;
       }
-    };
+    }
     standings!(ctx_1, msg_1, lockout, true);
     remove_lockout(&ctx_1, lockout.players).await;
     return;
-
   });
 }
 
@@ -306,14 +341,14 @@ pub async fn lockout_interactor(ctx: &Context) {
   let duels_wrap = get_duels(&ctx).await;
   if duels_wrap == None {
     return;
-  } 
+  }
 
   let lockouts = duels_wrap.unwrap();
   for lockout in lockouts.into_iter() {
     if lockout.clone().duel_type == DuelType::LOCKOUT {
       single_lockout_interactor(&ctx, lockout).await;
     }
-  };
+  }
 }
 
 fn to_num(arg: Option<&str>) -> Option<i32> {
@@ -325,8 +360,8 @@ fn to_num(arg: Option<&str>) -> Option<i32> {
       } else {
         None
       }
-    },
-    None => None
+    }
+    None => None,
   }
 }
 
@@ -343,72 +378,120 @@ pub async fn lockout(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
       if return_arg == "h" || return_arg == "help" {
         is_help = true;
       }
-    },
-    Err(_) => { }
+    }
+    Err(_) => {}
   };
   if is_help {
     let message = show_help().await;
     msg.channel_id.send_message(&ctx.http, message).await?;
     return Ok(());
   }
-  let args_result = handle_args(&ctx, &msg, args, format!("Don't start a lockout with yourself"), true).await;
+  let args_result = handle_args(
+    &ctx,
+    &msg,
+    args,
+    format!("Don't start a lockout with yourself"),
+    true,
+  )
+  .await;
   if let Err(why) = args_result {
     error_response!(ctx, msg, why);
     return Ok(());
   }
   let (opponents, option) = args_result.unwrap();
-  
+
   if opponents.len() == 0 {
-    error_response!(ctx, msg, format!("Please start a lockout with some registered users"));
+    error_response!(
+      ctx,
+      msg,
+      format!("Please start a lockout with some registered users")
+    );
     return Ok(());
   }
   if option != None && option.unwrap() == 1 {
-    let _ = msg.channel_id.say(&ctx.http, "Configure the lockout using:\n
+    let _ = msg
+      .channel_id
+      .say(
+        &ctx.http,
+        "Configure the lockout using:\n
     <number of problems> <duration (in minutes)> <average rating> <increment>\n
-    If you want an argument to take the default value, use `-1`").await?;
+    If you want an argument to take the default value, use `-1`",
+      )
+      .await?;
 
     let mut collector = MessageCollector::new(&ctx.shard)
-    .channel_id(msg.channel_id)
-    .timeout(Duration::from_secs(30))
-    .stream();
+      .channel_id(msg.channel_id)
+      .timeout(Duration::from_secs(30))
+      .stream();
     loop {
       if let Some(answer) = collector.next().await {
         if answer.author == msg.author {
           let mut arg = answer.content.split_whitespace();
           number_of_problems = match to_num(arg.next()) {
-            Some(count) => if count == -1 as i32 { DEFAULT_PROBLEM_COUNT } else { count } ,
-            None => DEFAULT_PROBLEM_COUNT
+            Some(count) => {
+              if count == -1 as i32 {
+                DEFAULT_PROBLEM_COUNT
+              } else {
+                count
+              }
+            }
+            None => DEFAULT_PROBLEM_COUNT,
           };
           lockout_duration = match to_num(arg.next()) {
-            Some(time) => if time == -1 as i32 { DEFAULT_DURATION } else { Duration::from_secs(60 * time as u64) },
-            None => DEFAULT_DURATION
+            Some(time) => {
+              if time == -1 as i32 {
+                DEFAULT_DURATION
+              } else {
+                Duration::from_secs(60 * time as u64)
+              }
+            }
+            None => DEFAULT_DURATION,
           };
           lockout_rating = match to_num(arg.next()) {
-            Some(rate) => rate, 
-            None => -1
+            Some(rate) => rate,
+            None => -1,
           };
           lockout_problems_increment = match to_num(arg.next()) {
-            Some(inc) => if inc == -1 as i32 { DEFAULT_INCREMENT } else { cmp::max(100, (inc / 100) * 100) },
-            None => DEFAULT_INCREMENT
+            Some(inc) => {
+              if inc == -1 as i32 {
+                DEFAULT_INCREMENT
+              } else {
+                cmp::max(100, (inc / 100) * 100)
+              }
+            }
+            None => DEFAULT_INCREMENT,
           };
           break;
         }
       } else {
-          let _ = msg.reply(ctx, "No answer within 30 seconds. We will use default parameter to start the lockout").await;
-          break;
+        let _ = msg
+          .reply(
+            ctx,
+            "No answer within 30 seconds. We will use default parameter to start the lockout",
+          )
+          .await;
+        break;
       };
     }
-
   }
 
   // lockout_rating = if lockout_rating == -1 as i32 && parsed_rate != None { parsed_rate.unwrap() as i32 } else { lockout_rating };
-  msg.channel_id.say(&ctx.http, format!("<@{user}> create a lockout match and invited some users\n
-  if you wish to join the lockout, please reponse with ~accept <@{user_2}> within 30 seconds", user = msg.author.id, user_2 = msg.author.id)).await?;
+  msg
+    .channel_id
+    .say(
+      &ctx.http,
+      format!(
+        "<@{user}> create a lockout match and invited some users\n
+  if you wish to join the lockout, please reponse with ~accept <@{user_2}> within 30 seconds",
+        user = msg.author.id,
+        user_2 = msg.author.id
+      ),
+    )
+    .await?;
 
   let accepted_users = collect_messages(&ctx, &msg, &opponents, WAIT_DURATION).await;
-  
-  if accepted_users.len() != 0 {
 
+  if accepted_users.len() != 0 {
     let users_in_lockout = confirm_user_in_match(&ctx, &msg, accepted_users).await;
 
     if users_in_lockout.len() <= 1 {
@@ -435,24 +518,26 @@ pub async fn lockout(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
         }
         ((sum) / count as u32) / 100 * 100
       }
-      rating => {
-        rating as u32
-      }, 
+      rating => rating as u32,
     };
 
     handle_lockout(
-      &ctx, 
-      &msg, 
-      users_in_lockout, 
-      number_of_problems as u32, 
-      lockout_duration, 
-      parsed_rating, 
-      lockout_problems_increment as u32
-    ).await;
+      &ctx,
+      &msg,
+      users_in_lockout,
+      number_of_problems as u32,
+      lockout_duration,
+      parsed_rating,
+      lockout_problems_increment as u32,
+    )
+    .await;
   } else {
-    error_response!(ctx, msg, format!("The lockedout has been cancelled because no one accept it"));
+    error_response!(
+      ctx,
+      msg,
+      format!("The lockedout has been cancelled because no one accept it")
+    );
   }
 
   Ok(())
 }
-

@@ -1,4 +1,3 @@
-
 #![allow(deprecated)]
 mod commands;
 mod core;
@@ -15,20 +14,20 @@ use serenity::model::event::ResumedEvent;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 
-use crate::commands::message::*;
-use crate::commands::ping::*;
-use crate::commands::math::*;
-use crate::commands::rating::*;
-use crate::commands::handle::*;
+use crate::commands::duel::*;
 use crate::commands::giveme::*;
+use crate::commands::handle::*;
 use crate::commands::help::*;
 use crate::commands::latency::*;
-use crate::commands::duel::*;
 use crate::commands::lockout::*;
+use crate::commands::math::*;
+use crate::commands::message::*;
+use crate::commands::ping::*;
+use crate::commands::rating::*;
 
 use crate::core::data::*;
 
-use serenity::framework::standard::macros::{ group, hook };
+use serenity::framework::standard::macros::{group, hook};
 use serenity::model::channel::Message;
 use tracing::{error, info, instrument};
 
@@ -61,28 +60,21 @@ impl EventHandler for Handler {
 // instrument will show additional information on all the logs that happen inside the function.
 //
 // This additional information includes the function name, along with all it's arguments formatted
-// with the Debug impl. This additional information will also only be shown if the LOG level is set
+// with the Debug pl. This additional information will also only be shown if the LOG level is set
 // to `debug`
 #[instrument]
 async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
-  info!("Running command `{command_name}` invoked by {}", msg.author.tag());
+  info!(
+    "Running command `{command_name}` invoked by {}",
+    msg.author.tag()
+  );
 
   true
 }
 
 #[group]
 #[commands(
-  handle, 
-  ping, 
-  message, 
-  multiply, 
-  rating, 
-  giveme,
-  gotit,
-  skip,
-  latency,
-  duel,
-  lockout
+  handle, ping, message, multiply, rating, giveme, gotit, skip, latency, duel, lockout
 )]
 struct General;
 
@@ -105,12 +97,14 @@ async fn main() {
       }
 
       (owners, info.id)
-
-    },
+    }
     Err(why) => panic!("Could not access application info: {:?}", why),
   };
 
-  let framework = StandardFramework::new().before(before).group(&GENERAL_GROUP).help(&MY_HELP);
+  let framework = StandardFramework::new()
+    .before(before)
+    .group(&GENERAL_GROUP)
+    .help(&MY_HELP);
   framework.configure(Configuration::new().owners(owners).prefix("~"));
 
   let intents = GatewayIntents::GUILD_MESSAGES
@@ -128,12 +122,13 @@ async fn main() {
   let shard_manager = client.shard_manager.clone();
 
   tokio::spawn(async move {
-    tokio::signal::ctrl_c().await.expect("Could not register ctrl+c handler");
-    shard_manager.shutdown_all().await; 
+    tokio::signal::ctrl_c()
+      .await
+      .expect("Could not register ctrl+c handler");
+    shard_manager.shutdown_all().await;
   });
 
   if let Err(why) = client.start().await {
-      error!("Client error: {:?}", why);
+    error!("Client error: {:?}", why);
   }
 }
-
