@@ -118,7 +118,7 @@ pub struct Contest {
   icpcRegion: Option<String>,
   country: Option<String>,
   city: Option<String>,
-  season: Option<String>,
+  pub season: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

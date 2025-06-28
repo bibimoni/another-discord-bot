@@ -21,3 +21,7 @@ features = ["macros", "signal", "rt-multi-thread"]
 [dependencies.serenity]
 version = "0.12.4"
 features = ["cache", "standard_framework", "rustls_backend", "collector"]
+
+[[bin]]
+name = "codeforces-trainer-bot"
+path = "src/main.rs"

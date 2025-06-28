@@ -1,0 +1,8 @@
+services:
+  app:
+    build: .
+    container_name: codeforces-trainer-bot
+    env_file:
+      - ./.env
+    volumes:
+      - .:/app                     # live source code

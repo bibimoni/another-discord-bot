@@ -5,7 +5,7 @@ use serenity::model::Timestamp;
 use serenity::prelude::*;
 
 use crate::Problem;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::commands::giveme::*;
 use crate::commands::lockout::*;
@@ -185,14 +185,18 @@ fn get_time_left_string(lockout: &Duel) -> String {
   time_left
 }
 
-pub fn create_problems_embed(vec_problem: &Vec<Problem>) -> CreateEmbed {
+pub fn create_problems_embed(vec_problem: &Vec<Problem>, elapsed_time: &Duration) -> CreateEmbed {
+  let (seconds, minutes, _) = convert_to_hms(&elapsed_time);
+  let time_took = format!("Took: {minutes} minute(s) {seconds} second(s)");
+  let footer = CreateEmbedFooter::new(&time_took);
   let problems: String = get_gym_problems_string(&vec_problem);
   let index: String = get_index_string(&vec_problem);
   let embed = CreateEmbed::new()
-    .title("ICPC training promblems")
+    .title("ICPC training problems")
     .field("Index", index, true)
     .field("Problems", problems, true)
-    .colour(Colour::ROSEWATER);
+    .colour(Colour::ROSEWATER)
+    .footer(footer);
   embed
 }
 

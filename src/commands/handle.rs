@@ -67,7 +67,7 @@ pub struct Author {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Submission {
   id: u64,
-  contestId: Option<u32>,
+  pub contestId: Option<u32>,
   pub creationTimeSeconds: u64,
   relativeTimeSeconds: u64,
   pub problem: Problem,

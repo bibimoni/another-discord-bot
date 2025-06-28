@@ -4,7 +4,7 @@ use serenity::framework::standard::{Args, CommandResult};
 use serenity::model::prelude::*;
 use serenity::prelude::*;
 
-use std::cmp;
+use std::cmp::{self, Ordering};
 use std::env;
 use std::time::SystemTime;
 
@@ -31,6 +31,8 @@ use serde::{Deserialize, Serialize};
 const CHALLANGE_DURATION: Duration = Duration::from_millis(1000 * 60 * 30);
 pub const MAX_RATING: u32 = 3500;
 pub const MIN_RATING: u32 = 800;
+pub const MAX_ICPC_PROBLEM_REQUEST: u8 = 13;
+pub const ICPC_YEAR_FILTER: Option<u32> = Some(2018);
 
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -208,21 +210,31 @@ pub async fn get_problems_with_given_problemset(
  * The standard deviation is equal to n / 4
  * Where n is the number of problem in the contest where it belongs
  */
-pub async fn get_icpc_problems(problem_count: u32) -> Result<Vec<Problem>, String> {
+pub async fn get_icpc_problems(
+  mut problem_count: u32,
+  handle: &String,
+) -> Result<Vec<Problem>, String> {
   let contests_wrap = get_contests(true).await;
   if let Err(why) = contests_wrap {
     return Err(why);
   }
+  let max_submission = 999999;
+  let submissions_wrap = get_user_submission(&handle, max_submission).await;
+  if let Err(why) = submissions_wrap {
+    return Err(why);
+  }
+
+  let submissions = submissions_wrap.unwrap();
   let contests = contests_wrap.unwrap();
+
   let mut problems = Vec::<Problem>::new();
-  for _ in 0..problem_count {
+  loop {
     // I probably shouldn't clone contests and should come up with better idea but i'm lazy af
     // TO-DO! Please change this in the future
     let picked_contest = get_icpc_contest_with_weights(contests.clone()).clone();
     println!("{:?}", picked_contest);
     let contest_standing_warp = get_contest_standing(picked_contest.id).await;
     if let Err(why) = contest_standing_warp {
-      println!("{:?}", why);
       return Err(why);
     }
     let contest_standing = contest_standing_warp.unwrap();
@@ -239,8 +251,8 @@ pub async fn get_icpc_problems(problem_count: u32) -> Result<Vec<Problem>, Strin
     let mut weights = Vec::<f64>::new();
 
     let n = Normal::new(
-      contest_problems.len() as f64 / 2f64,
-      contest_problems.len() as f64 / 4f64,
+      contest_problems.len() as f64 / 2f64, // mean
+      contest_problems.len() as f64 / 4f64, // standard deviation
     )
     .unwrap();
     for i in 0..contest_problems.len() {
@@ -249,7 +261,19 @@ pub async fn get_icpc_problems(problem_count: u32) -> Result<Vec<Problem>, Strin
 
     let distribution = WeightedIndex::new(&weights).unwrap();
     let mut rng = thread_rng();
-    problems.push(contest_problems[indices[distribution.sample(&mut rng)]].clone());
+    let picked_problem = contest_problems[indices[distribution.sample(&mut rng)]].clone();
+    if submissions
+      .iter()
+      .any(|sub| sub.problem == picked_problem && sub.verdict == Some(format!("OK")))
+    {
+      continue;
+    }
+    problems.push(picked_problem);
+
+    problem_count -= 1;
+    if problem_count == 0 {
+      break;
+    }
   }
   Ok(problems)
 }
@@ -309,6 +333,30 @@ pub fn get_icpc_contest_with_weights(mut contests: Vec<Contest>) -> Contest {
     .filter(|contest| contest.name.clone().contains("ICPC"))
     .collect::<Vec<_>>();
 
+  contests.sort_by(|a, b| match (a.season.clone(), b.season.clone()) {
+    (Some(a_str), Some(b_str)) => {
+      let a_year = a_str.split('-').next().unwrap().parse::<i32>().unwrap();
+      let b_year = b_str.split('-').next().unwrap().parse::<i32>().unwrap();
+      a_year.cmp(&b_year)
+    }
+    (None, Some(_)) => Ordering::Less,
+    (Some(_), None) => Ordering::Greater,
+    (None, None) => Ordering::Equal,
+  });
+
+  if let Some(year) = ICPC_YEAR_FILTER {
+    contests = contests
+      .into_iter()
+      .filter(|contest| {
+        if let Some(season) = contest.season.clone() {
+          if let Some(c_year) = season.split('-').next().unwrap().parse::<u32>().ok() {
+            return year <= c_year;
+          }
+        }
+        false
+      })
+      .collect::<Vec<_>>();
+  }
   for i in 0..contests.len() {
     weights.push(weight(i, contests.len(), constant));
   }
@@ -373,11 +421,13 @@ async fn giveme(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let problem_count: Option<u32>;
     match args.single::<u32>() {
       Ok(cnt) => {
-        if cnt >= 21 {
+        if cnt > MAX_ICPC_PROBLEM_REQUEST as u32 {
           error_response!(
             ctx,
             msg,
-            format!("Please only ask for 20 problems or less! (like literally)")
+            format!(
+              "Please only ask for {MAX_ICPC_PROBLEM_REQUEST} problems or less! (like literally)"
+            )
           );
           return Ok(());
         } else {
@@ -388,7 +438,9 @@ async fn giveme(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         error_response!(
           ctx,
           msg,
-          format!("Please provide the number of problems (32-bit integer)")
+          format!(
+            "Please provide the number of problems (0 to {MAX_ICPC_PROBLEM_REQUEST} problems)"
+          )
         );
         return Ok(());
       }
@@ -402,13 +454,16 @@ async fn giveme(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
       .send_message(&ctx.http, builder)
       .await
       .unwrap();
-    let problems_wrap = get_icpc_problems(problem_count.unwrap()).await;
+    let start_time = SystemTime::now();
+    let problems_wrap = get_icpc_problems(problem_count.unwrap(), &user.handle).await;
     if let Err(_) = problems_wrap {
       let _ = edit_to_failed_status(ctx, message).await;
       return Ok(());
     }
     let problems = problems_wrap.unwrap();
-    let embed = create_problems_embed(&problems);
+    let after = SystemTime::now();
+    let elapsed_time = after.duration_since(start_time).unwrap();
+    let embed = create_problems_embed(&problems, &elapsed_time);
     edit_to_message(&ctx, embed, message).await;
     return Ok(());
   }
